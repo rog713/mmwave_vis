@@ -1,6 +1,6 @@
 // Display tab: what the map shows, the map range, and the room layout.
 
-import { state, emit } from './state.js';
+import { state, emit, AREA_CATEGORY, DEV } from './state.js';
 import * as prefs from './prefs.js';
 import { $, toast, confirmAction } from './ui.js';
 import { DEFAULT_RANGE } from './radar.js';
@@ -14,9 +14,10 @@ const TOGGLES = [
     ['vizToggleDetection', 'vizShowDetection', 'detection', true],
     ['vizToggleStay', 'vizShowStay', 'stay', true],
     ['vizToggleInterference', 'vizShowInterference', 'interference', true],
+    ['vizToggleRanges', 'vizShowRanges', 'ranges', true],      // ESPHome: the LD2412's distances
 ];
 const RANGE_KEYS = { xMin: 'vizXMin', xMax: 'vizXMax', yMin: 'vizYMin', yMax: 'vizYMax' };
-const EMPTY_LAYOUT = { x: 0, y: 0, rot: 0, room: null };
+const EMPTY_LAYOUT = { x: 0, y: 0, rot: 0, room: null, mirror: false };
 const LAYOUT_LIMIT = 10000;   // cm either way; the addon refuses a layout beyond this
 const MIN_ROOM = 20;          // cm
 
@@ -122,6 +123,7 @@ export function fillLayout() {
     set('layoutX', l.x);
     set('layoutY', l.y);
     set('layoutRot', l.rot);
+    $('#layoutMirror').checked = !!l.mirror;
     $('#btnRoom').textContent = l.room ? 'Remove room outline' : 'Add room outline';
     $('#roomFields').hidden = !l.room;
     if (l.room) {
@@ -131,7 +133,7 @@ export function fillLayout() {
 }
 
 function copyLayout(l) {
-    return { x: l.x, y: l.y, rot: l.rot, room: l.room ? { ...l.room } : null };
+    return { x: l.x, y: l.y, rot: l.rot, room: l.room ? { ...l.room } : null, mirror: !!l.mirror };
 }
 
 // Whole centimetres and degrees, within what the addon accepts, and a room with some size
@@ -140,6 +142,7 @@ function tidyLayout(l) {
     l.x = c(l.x);
     l.y = c(l.y);
     l.rot = ((Math.round(Number(l.rot) || 0) % 360) + 360) % 360;
+    l.mirror = !!l.mirror;
     if (l.room) {
         const r = l.room;
         for (const [lo, hi] of [['x_min', 'x_max'], ['y_min', 'y_max']]) {
@@ -160,7 +163,7 @@ function scheduleSave() {
     clearTimeout(saveTimer);
     const topic = state.device;
     const layout = copyLayout(state.layout);
-    const isEmpty = !layout.x && !layout.y && !layout.rot && !layout.room;
+    const isEmpty = !layout.x && !layout.y && !layout.rot && !layout.room && !layout.mirror;
     saveTimer = setTimeout(() => {
         if (!topic) return;
         state.socket.emit('save_layout', { topic, layout: isEmpty ? null : layout }, ack => {
@@ -172,7 +175,7 @@ function scheduleSave() {
 
 function needDevice() {
     if (state.device) return false;
-    toast('Choose a switch first.', 'error');
+    toast(`Choose a ${DEV} first.`, 'error');
     return true;
 }
 
@@ -209,7 +212,7 @@ export function layoutFromServer(layout) {
 
 function defaultRoom() {
     // Around detection area 1 when there is one, otherwise a 6 × 4.5 m room in front of the switch
-    const a1 = state.zones.mmwave_detection_areas.area1;
+    const a1 = (state.zones[AREA_CATEGORY] || {}).area1;
     const pts = a1
         ? [[a1.x_min, a1.y_min], [a1.x_max, a1.y_min], [a1.x_max, a1.y_max], [a1.x_min, a1.y_max]]
         : [[-300, 0], [300, 0], [300, 450], [-300, 450]];
@@ -237,9 +240,15 @@ function initLayout() {
     });
     $('#btnLayoutReset').addEventListener('click', async () => {
         if (needDevice()) return;
-        if (!await confirmAction('Put the switch back in the middle with no room outline?', { confirm: 'Reset layout' })) return;
-        changeLayout(l => Object.assign(l, EMPTY_LAYOUT));
+        if (!await confirmAction(`Put the ${DEV} back in the middle with no room outline?`, { confirm: 'Reset layout' })) return;
+        // Mirroring says which way the radar counts x, not where it sits, so it's kept
+        changeLayout(l => Object.assign(l, EMPTY_LAYOUT, { mirror: l.mirror }));
         fullRange();
+    });
+    $('#layoutMirror').addEventListener('change', e => {
+        const mirror = e.target.checked;
+        if (needDevice()) { e.target.checked = !!state.layout.mirror; return; }
+        changeLayout(l => { l.mirror = mirror; });
     });
     $('#btnArrange').addEventListener('click', () => {
         if (!state.arranging && needDevice()) return;

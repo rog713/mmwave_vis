@@ -19,6 +19,8 @@ Decodes Zigbee2MQTT payloads to visualize real-time MQTT data and configure dete
 ZHA support has just been added experimentally. Requires a custom Quark that I have built to be installed in ZHA.
 [ZHA DOC HERE](ZHADOC.md)
 
+**Apollo R PRO-1:** the Visualizer also works with Apollo Automation's PoE dual mmWave multisensor (LD2450 + LD2412) through its ESPHome entities in Home Assistant: the live map, its three zones and zone type, both radars' settings and the LD2412's gates. Set `zigbee_stack` to `esphome`. [APOLLO DOC HERE](APOLLO.md)
+
 > **ZHA on Home Assistant 2026.8 or later:** keep (or install) this repo's quirk even though ZHA now supports the VZM32-SN on its own. The built-in support doesn't pass the switch's radar reports on to Home Assistant, so without this quirk the Visualizer shows no targets, areas or zones (the switch's settings still work). [Why](ZHADOC.md#why-the-custom-quirk-is-still-needed)
 
 ## Features
@@ -109,7 +111,7 @@ Navigate to `http://<your-ip>:5000`.
 
 | Variable | Description | Default |
 |---|---|---|
-| `ZIGBEE_STACK` | `z2m` or `zha` | `z2m` |
+| `ZIGBEE_STACK` | `z2m`, `zha`, or `esphome` for an [Apollo R PRO-1](APOLLO.md) | `z2m` |
 | `MQTT_BROKER` | MQTT broker host | `core-mosquitto` |
 | `MQTT_PORT` | MQTT broker port | `1883` |
 | `MQTT_USERNAME` | MQTT username | `""` |
@@ -118,8 +120,8 @@ Navigate to `http://<your-ip>:5000`.
 | `MQTT_USE_TLS` | Enable TLS/SSL | `false` |
 | `MQTT_TLS_INSECURE` | Skip cert verification (not recommended) | `false` |
 | `MQTT_TLS_CA_CERT` | Path to custom CA certificate file | `""` |
-| `HA_URL` | Home Assistant URL (ZHA mode only) | `http://supervisor` |
-| `HA_TOKEN` | Long-lived access token (ZHA mode only) | `""` |
+| `HA_URL` | Home Assistant URL (ZHA and ESPHome modes), e.g. `http://homeassistant.local:8123` | `http://supervisor` |
+| `HA_TOKEN` | Long-lived access token (ZHA and ESPHome modes) | `""` |
 | `DEBUG` | Verbose logging | `false` |
 
 #### TLS/SSL
@@ -221,6 +223,8 @@ Z-Wave switches aren't supported yet. The VZW32-SN reports target positions on f
 - Home Assistant OS or Supervised
 - [Zigbee2MQTT](https://www.zigbee2mqtt.io/) v2.8.0 or higher (ZHA is not supported)
 - At least one Inovelli mmWave Smart Switch
+
+For an Apollo R PRO-1 instead: the sensor added to Home Assistant with the ESPHome integration. Neither Zigbee2MQTT nor MQTT is needed. See [APOLLO.md](APOLLO.md).
 
 ## License
 

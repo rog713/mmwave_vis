@@ -1,6 +1,6 @@
 // Zone backup and restore (#52): save a switch's zones to a file and put them back.
 
-import { state, emit, ZONE_KEYS, ZONE_TYPES, AREAS } from './state.js';
+import { state, emit, ZONE_KEYS, ZONE_TYPES, AREAS, DEV } from './state.js';
 import { $, toast, confirmAction, plural, downloadBlob, fileSafe } from './ui.js';
 import { EMPTY_AREA, zoneToDevicePayload, endEdit, sameZone, isMirroredX, clearPending, renderZoneList, SWITCH_ROUNDING_CM as ROUNDING } from './zones.js';
 import { setNames } from './names.js';
@@ -42,17 +42,17 @@ export async function readZonesFromSwitch(timeoutMs = 12000) {
 }
 
 async function exportZones() {
-    if (!state.device) { toast('Choose a switch first.', 'error'); return; }
+    if (!state.device) { toast(`Choose a ${DEV} first.`, 'error'); return; }
     const topic = state.device;
     setBusy(true);
-    statusLine.textContent = 'Reading zones from the switch…';
+    statusLine.textContent = `Reading zones from the ${DEV}…`;
     const missing = await readZonesFromSwitch();
     setBusy(false);
     if (state.device !== topic) { statusLine.textContent = ''; return; }
     if (missing.length) {
         const names = missing.map(c => GROUP_NAMES[c]).join(', ');
         statusLine.textContent = '';
-        toast(`The switch didn't report its ${names} zones, so nothing was saved. Try again in a moment.`, 'error', 6000);
+        toast(`The ${DEV} didn't report its ${names} zones, so nothing was saved. Try again in a moment.`, 'error', 6000);
         return;
     }
 
@@ -77,7 +77,7 @@ async function exportZones() {
     }
     if (Object.keys(names).length) backup.names = names;
     downloadBlob(new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' }),
-        `mmwave-zones-${fileSafe(name, 'switch')}-${backup.exported.slice(0, 10)}.json`);
+        `mmwave-zones-${fileSafe(name, DEV)}-${backup.exported.slice(0, 10)}.json`);
     statusLine.textContent = `Exported ${plural(count, 'zone')} from ${name}.`;
 }
 
@@ -96,7 +96,7 @@ export function parseZoneBackup(text) {
         const areas = data.zones[group];
         if (areas == null) { skipped.push(group); continue; }
         if (typeof areas !== 'object' || Array.isArray(areas)) throw new Error(`The ${group} zones in that file are malformed.`);
-        for (let i = 1; i <= 4; i++) {
+        for (let i = 1; i <= AREAS.length; i++) {
             const area = areas[`area${i}`];
             if (area == null) {
                 // Detection area 1 holds the room limits; never wipe it
@@ -130,7 +130,7 @@ async function onFileChosen() {
     const file = fileInput.files[0];
     fileInput.value = '';   // so picking the same file again still fires
     if (!file) return;
-    if (!state.device) { toast('Choose a switch first.', 'error'); return; }
+    if (!state.device) { toast(`Choose a ${DEV} first.`, 'error'); return; }
 
     let parsed;
     try { parsed = parseZoneBackup(await file.text()); }
@@ -192,15 +192,15 @@ export async function restoreZones(writes, { label = null, status = null } = {})
     // Send one area at a time; returns why it had to stop, or null
     const send = async (list, label) => {
         for (let i = 0; i < list.length; i++) {
-            if (state.device !== topic) return 'a different switch was selected';
+            if (state.device !== topic) return `a different ${DEV} was selected`;
             if (!state.socket.connected) return 'the connection to the addon dropped';
-            if (errors.length) return `the switch rejected a write (${errors[0]})`;
+            if (errors.length) return `the ${DEV} rejected a write (${errors[0]})`;
             const w = list[i];
             state.socket.emit('update_parameter', { param: w.category, value: { [w.area]: w.payload } });
             show(`${label} ${i + 1}/${list.length}`);
             await sleep(RESTORE_GAP_MS);
         }
-        return errors.length ? `the switch rejected a write (${errors[0]})` : null;
+        return errors.length ? `the ${DEV} rejected a write (${errors[0]})` : null;
     };
     const slotName = w => `${GROUP_NAMES[w.category]} area ${w.area.slice(4)}`;
     const current = w => state.zones[w.category][w.area];
@@ -221,7 +221,7 @@ export async function restoreZones(writes, { label = null, status = null } = {})
         let prev = null;
         await sleep(3000);
         while (true) {
-            show(`Checking the switch… (${Math.round((Date.now() - started) / 1000)} s)`);
+            show(`Checking the ${DEV}… (${Math.round((Date.now() - started) / 1000)} s)`);
             const missing = await readZonesFromSwitch();
             if (state.device !== topic) return [];
             const snap = list.map(w => JSON.stringify(current(w)));
@@ -251,10 +251,10 @@ export async function restoreZones(writes, { label = null, status = null } = {})
             });
         }
 
-        if (state.device !== topic) return finish(`${what} stopped because a different switch was selected.`, false);
+        if (state.device !== topic) return finish(`${what} stopped because a different ${DEV} was selected.`, false);
         if (missing.length) {
             const names = missing.map(c => GROUP_NAMES[c]).join(', ');
-            return finish(`Zones were sent, but the switch didn't report its ${names} zones back, so they couldn't be checked. Press Sync to look.`, false);
+            return finish(`Zones were sent, but the ${DEV} didn't report its ${names} zones back, so they couldn't be checked. Press Sync to look.`, false);
         }
         const wrong = writes.filter(w => !matches(w));
         if (wrong.length) return finish(`${what} finished, but ${plural(wrong.length, 'slot')} ${wrong.length === 1 ? 'doesn\'t' : 'don\'t'} match: ${wrong.map(slotName).join(', ')}.`, false);

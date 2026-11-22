@@ -1,6 +1,6 @@
 name: "Inovelli mmWave Visualizer"
-description: "Live 2D tracking for Inovelli mmWave switches via MQTT-Z2M or ZHA"
-version: "4.2.2"
+description: "Live 2D tracking for Inovelli mmWave switches via MQTT-Z2M or ZHA, and the Apollo R PRO-1 via ESPHome"
+version: "4.3.0"
 slug: "mmwave_viz"
 init: false
 arch:
@@ -18,6 +18,7 @@ homeassistant_api: true
 backup_exclude:
   - "history.db*"
 options:
+  # "z2m" or "zha" for Inovelli switches; "esphome" for an Apollo R PRO-1 (needs no MQTT)
   zigbee_stack: "z2m"
   debug: false
   mqtt_broker: "core-mosquitto"

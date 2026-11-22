@@ -2,7 +2,7 @@
 // the targets table and tabs. The map, zones, recorder, backup, display
 // settings and Z-Wave capture live in their own modules.
 
-import { state, on, emit, emptyZones, freshReportTimes, zoneName, customName, ZONE_TYPES } from './state.js';
+import { state, on, emit, emptyZones, freshReportTimes, zoneName, customName, slotName, ZONE_TYPES, AREAS, AREA_CATEGORY, HAS_HEIGHT, ESPHOME, STACK, DEV, DEVS } from './state.js';
 import * as prefs from './prefs.js';
 import { $, $$, h, setText, num, toast, setNotice, clearNotice, bindPopover, closePopover, confirmAction, downloadBlob, fileSafe, duration, bindInfo } from './ui.js';
 import { Radar } from './radar.js';
@@ -18,11 +18,12 @@ import { initTester, stopTests, STAY_LIFE_STEP_S } from './tester.js';
 import { initSwitchInfo, deviceInfoFromServer, clearDeviceInfo } from './switchinfo.js';
 import * as config from './config.js';
 import * as changes from './changes.js';
+import { initEsphome } from './esphome.js';
 
 const ingress = document.body.dataset.ingress || '';
 const socket = io({ path: ingress + '/socket.io' });
 state.socket = socket;
-state.stack = (document.body.className.match(/stack-(\w+)/) || [])[1] || null;
+state.stack = STACK;
 
 const deviceSelect = $('#deviceSelect');
 const mapEl = $('#map');
@@ -119,7 +120,8 @@ function packetClock() {
     return clock.format(t) + '.' + String(t.getMilliseconds()).padStart(3, '0');
 }
 
-const backendName = () => state.stack === 'zha' ? 'Home Assistant' : 'MQTT broker';
+const viaHA = () => state.stack === 'zha' || ESPHOME;
+const backendName = () => viaHA() ? 'Home Assistant' : 'MQTT broker';
 
 function ago(seconds) {
     return seconds < 60 ? `${Math.round(seconds)} s` : `${Math.floor(seconds / 60)} min`;
@@ -133,7 +135,7 @@ function renderStatus() {
         text = conn.ws === 'connecting' ? 'Connecting…' : 'Offline';
     } else if (conn.backend === false) {
         dot = 'bad';
-        text = state.stack === 'zha' ? 'HA offline' : 'MQTT offline';
+        text = viaHA() ? 'HA offline' : 'MQTT offline';
     } else if (!state.device) {
         text = 'Connected';
     } else if (age === null) {
@@ -158,14 +160,14 @@ function renderStatus() {
     setText($('#popBackendLabel'), backendName());
     $('#popBackendDot').className = 'dot ' + (conn.backend === null ? '' : conn.backend ? 'ok' : 'bad');
     setText($('#popBackend'), conn.backend === null ? 'Unknown' : conn.backend ? 'Connected' : 'Disconnected' + (conn.error ? ` (${conn.error})` : ''));
-    setText($('#popStack'), state.stack === 'zha' ? 'ZHA' : state.stack === 'z2m' ? 'Zigbee2MQTT' : 'Unknown');
+    setText($('#popStack'), state.stack === 'zha' ? 'ZHA' : state.stack === 'z2m' ? 'Zigbee2MQTT' : ESPHOME ? 'ESPHome, through Home Assistant' : 'Unknown');
     setText($('#popPacket'), lastPacket ? `${packetClock()} (${age.toFixed(1)} s ago)` : 'None yet');
 }
 setInterval(renderStatus, 200);
 
 function applyStack(stack) {
     state.stack = stack;
-    document.body.classList.remove('stack-z2m', 'stack-zha');
+    document.body.classList.remove('stack-z2m', 'stack-zha', 'stack-esphome');
     if (stack) document.body.classList.add('stack-' + stack);
     renderStatus();
 }
@@ -185,11 +187,12 @@ function setOccupancy(value) {
 
 function renderAreaChips() {
     $$('#areaChips .chip').forEach((chip, i) => {
-        const area = `area${i + 1}`;
-        const custom = customName('mmwave_detection_areas', area);
-        setText(chip, custom ? (custom.length > 14 ? custom.slice(0, 13) + '…' : custom) : `Area ${i + 1}`);
+        const area = AREAS[i];
+        if (!area) return;
+        const custom = customName(AREA_CATEGORY, area);
+        setText(chip, custom ? (custom.length > 14 ? custom.slice(0, 13) + '…' : custom) : slotName(AREA_CATEGORY, area));
         chip.classList.toggle('on', state.areaOccupied[i]);
-        chip.title = `${zoneName('mmwave_detection_areas', area)} ${state.areaOccupied[i] ? 'occupied' : 'clear'}`;
+        chip.title = `${zoneName(AREA_CATEGORY, area)} ${state.areaOccupied[i] ? 'occupied' : 'clear'}`;
     });
     radar.setOccupied(state.areaOccupied);
 }
@@ -209,11 +212,14 @@ function renderTable(list) {
     if (!list.length) { emptyRow('No one in view'); return; }
     tableBody.replaceChildren(...list.map(t => {
         let cls = 'move-still', text = 'Still';
-        if (t.dop > 10) { cls = 'move-away'; text = `Moving away (${num(t.dop)})`; }
-        else if (t.dop < -10) { cls = 'move-toward'; text = `Approaching (${num(t.dop)})`; }
+        const unit = ESPHOME ? ' cm/s' : '';     // the LD2450 gives a real speed
+        if (t.dop > 10) { cls = 'move-away'; text = `Moving away (${num(t.dop)}${unit})`; }
+        else if (t.dop < -10) { cls = 'move-toward'; text = `Approaching (${num(t.dop)}${unit})`; }
+        // No height from an LD2450: its third column is how far away the person is
+        const third = HAS_HEIGHT ? `${num(t.z)} cm` : `${(Math.hypot(Number(t.x), Number(t.y)) / 100).toFixed(2)} m`;
         return h('tr', null,
             h('td', null, h('strong', null, String(t.id))),
-            h('td', null, `${num(t.x)} cm`), h('td', null, `${num(t.y)} cm`), h('td', null, `${num(t.z)} cm`),
+            h('td', null, `${num(t.x)} cm`), h('td', null, `${num(t.y)} cm`), h('td', null, third),
             h('td', { class: cls }, text));
     }));
 }
@@ -279,7 +285,7 @@ deviceSelect.addEventListener('change', async () => {
         const n = changes.queued.size;
         deviceSelect.value = state.device;
         const what = n === 1 ? 'a change that hasn\'t' : `${n} changes that haven't`;
-        if (!await confirmAction(`This switch has ${what} been applied. Switch anyway and discard ${n === 1 ? 'it' : 'them'}?`,
+        if (!await confirmAction(`This ${DEV} has ${what} been applied. ${ESPHOME ? 'Change' : 'Switch'} anyway and discard ${n === 1 ? 'it' : 'them'}?`,
             { confirm: 'Discard', danger: true })) return;
         deviceSelect.value = topic;
     }
@@ -291,7 +297,7 @@ $('#btnSync').addEventListener('click', () => {
     if (state.edit) zones.endEdit();
     socket.emit('request_devices');
     socket.emit('force_sync');
-    toast(state.device ? 'Asking the switch for its settings and zones…' : 'Refreshing the list of switches…');
+    toast(state.device ? `Asking the ${DEV} for its settings and zones…` : `Refreshing the list of ${DEVS}…`);
 });
 
 // --- Settings sent to the switch -----------------------------------------------
@@ -308,7 +314,7 @@ paramInputs.forEach(input => {
         const param = input.dataset.param;
         const value = changes.check(param, changes.controlValue(input));
         if (value === null || !state.device) {
-            if (!state.device) toast('Choose a switch first.', 'error');
+            if (!state.device) toast(`Choose a ${DEV} first.`, 'error');
             showParam(input, changes.shown(param), true);
             return;
         }
@@ -345,7 +351,7 @@ function renderUnsupported() {
     for (const input of paramInputs) {
         const off = unsupported.has(input.dataset.param);
         input.disabled = off;
-        input.title = off ? 'The ZHA quirk running this switch can\'t change this' : '';
+        input.title = !off ? '' : ESPHOME ? 'Its entity is disabled or missing in Home Assistant' : 'The ZHA quirk running this switch can\'t change this';
     }
 }
 
@@ -401,7 +407,7 @@ const COMMANDS = {
 $$('[data-command]').forEach(btn => btn.addEventListener('click', async () => {
     const id = Number(btn.dataset.command);
     const cmd = COMMANDS[id];
-    if (!state.device) { toast('Choose a switch first.', 'error'); return; }
+    if (!state.device) { toast(`Choose a ${DEV} first.`, 'error'); return; }
     if (cmd.ask && !await confirmAction(cmd.ask, { confirm: cmd.label, danger: true })) return;
     const entry = pushSnapshot(cmd.undo, [cmd.category]);
     if (entry) {
@@ -492,7 +498,7 @@ $('#menuDiagnostics').addEventListener('click', async e => {
         const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
         downloadBlob(new Blob([JSON.stringify(report, null, 1)], { type: 'application/json' }),
             `mmwave-diagnostics-${fileSafe(state.deviceName, 'addon')}-${stamp}.json`);
-        toast('Diagnostics saved. It includes switch names and recent positions, so look it over before posting it.', 'success', 7000);
+        toast(`Diagnostics saved. It includes ${DEV} names and recent positions, so look it over before posting it.`, 'success', 7000);
     } catch (err) {
         toast(`Couldn't get the diagnostics from the addon (${err.message}).`, 'error');
     }
@@ -612,7 +618,7 @@ socket.on('device_list', devices => {
     state.devices = devices;
     const present = !!state.device && devices.some(d => d.topic === state.device);
     deviceSelect.replaceChildren(
-        h('option', { value: '', disabled: true }, devices.length ? 'Choose a switch' : 'No switches found'),
+        h('option', { value: '', disabled: true }, devices.length ? `Choose a ${DEV}` : `No ${DEVS} found`),
         ...devices.map(d => h('option', { value: d.topic, title: d.label === d.friendly_name ? null : d.friendly_name }, d.label)),
         // Keep showing the switch this page is on while the addon hasn't (re)discovered it
         state.device && !present ? h('option', { value: state.device }, `${state.deviceName} (not found)`) : null);
@@ -628,6 +634,16 @@ socket.on('device_list', devices => {
         });
     } else {
         clearNotice('zhaSetup');
+    }
+    // Not while Home Assistant is unreachable: that notice already says why the list is empty
+    if (ESPHOME && devices.length === 0 && conn.backend !== false) {
+        setNotice('esphomeSetup', {
+            tone: 'info',
+            title: 'No presence sensor found in Home Assistant yet.',
+            text: 'The addon lists ESPHome devices that have LD2450 target entities, such as the Apollo R PRO-1. Add the sensor to Home Assistant with the ESPHome integration, then press Sync.',
+        });
+    } else {
+        clearNotice('esphomeSetup');
     }
 
     if (resubscribe && present) {
@@ -761,6 +777,7 @@ historyReady = true;
 history.tabShown(prefs.get('activeTab') === 'tab-history');
 config.tabShown(prefs.get('activeTab') === 'tab-config');
 config.initConfig();
+initEsphome(radar);
 radar.setZones(zones.displayZones(), zones.pendingKeys());
 radar.setRecording(recorder.slots, recorder.padding());
 renderStatus();

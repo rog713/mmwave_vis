@@ -3,13 +3,16 @@ Inovelli mmWave Visualizer — Backend
 =====================================
 Real-time MQTT/ZHA-to-WebSocket bridge for Home Assistant Ingress.
 
-Supports two Zigbee stacks, selected via the addon Configuration tab:
-  zigbee_stack: "z2m"  — Zigbee2MQTT over MQTT (original behaviour)
-  zigbee_stack: "zha"  — ZHA via the Home Assistant WebSocket API
+Supports two Zigbee stacks for Inovelli switches, and ESPHome presence sensors,
+selected via the addon Configuration tab:
+  zigbee_stack: "z2m"      — Zigbee2MQTT over MQTT (original behaviour)
+  zigbee_stack: "zha"      — ZHA via the Home Assistant WebSocket API
+  zigbee_stack: "esphome"  — Apollo R PRO-1 (LD2450 + LD2412) through its
+                             Home Assistant entities ("apollo" works too)
 
 All socket.io event handlers are stack-agnostic — they delegate to a
-driver object (Z2MDriver or ZHADriver) that implements a common interface.
-The frontend receives identical events regardless of which stack is active.
+driver object (Z2MDriver, ZHADriver or EsphomeDriver) that implements a common
+interface. The frontend receives the same events whichever one is active.
 
 Debug mode (debug: true in config):
   Logs every socket.io emit and, for ZHA, every raw WebSocket message
@@ -75,6 +78,9 @@ def _as_bool(v):
 
 
 ZIGBEE_STACK    = _cfg('zigbee_stack',    'ZIGBEE_STACK',    'z2m').lower().strip()
+# The R PRO-1 isn't a Zigbee device, but it's chosen with the same option
+if ZIGBEE_STACK in ('apollo', 'r_pro-1', 'r_pro_1', 'r-pro-1'):
+    ZIGBEE_STACK = 'esphome'
 DEBUG           = _as_bool(_cfg('debug',  'DEBUG',           False))
 MQTT_BROKER     = _cfg('mqtt_broker',     'MQTT_BROKER',     'core-mosquitto')
 MQTT_PORT       = _cfg('mqtt_port',       'MQTT_PORT',       1883, int)
@@ -119,15 +125,15 @@ if ZIGBEE_STACK == 'z2m':
         tls_note += ")"
         print(f"MQTT TLS     : {tls_note}", flush=True)
 
-if ZIGBEE_STACK == 'zha':
-    print(f"ZHA ha_url   : {HA_URL}", flush=True)
+if ZIGBEE_STACK in ('zha', 'esphome'):
+    print(f"HA ha_url    : {HA_URL}", flush=True)
     if _supervisor_token:
-        print(f"ZHA token    : SUPERVISOR_TOKEN (len={len(_supervisor_token)})", flush=True)
+        print(f"HA token     : SUPERVISOR_TOKEN (len={len(_supervisor_token)})", flush=True)
     elif _config_token:
-        print(f"ZHA token    : ha_token from config (len={len(_config_token)})", flush=True)
+        print(f"HA token     : ha_token from config (len={len(_config_token)})", flush=True)
     else:
         print(
-            "ZHA WARNING  : No token found.\n"
+            "HA WARNING   : No token found.\n"
             "               Ensure homeassistant_api: true is set in config.yaml\n"
             "               and the addon has been fully stopped and restarted.\n"
             "               Alternatively, set ha_token in the addon Configuration\n"
@@ -171,7 +177,8 @@ zone_name_store = LayoutStore(os.path.join(DATA_DIR, 'zone_names.json'),
 switch_name_store = LayoutStore(os.path.join(DATA_DIR, 'switch_names.json'),
                                 normalize=normalize_switch_name, label='Switch names')
 
-HA_WS_URL = ha_ws.ws_url(HA_URL)
+# Without a Supervisor (standalone Docker) HA_URL is Home Assistant itself
+HA_WS_URL = ha_ws.ws_url(HA_URL, direct=not _supervisor_token)
 registry = ha_ws.RegistryCache(HA_TOKEN, HA_WS_URL)
 
 PACKET_RING = 150   # recent messages per switch, for the diagnostics file
@@ -1269,6 +1276,155 @@ class ZHADriver:
 
 
 # ===========================================================================
+# ESPHOME DRIVER
+# Apollo R PRO-1 (LD2450 + LD2412) through its Home Assistant entities. Thin
+# wrapper around EsphomeClient, with the same interface as the Zigbee drivers.
+# ===========================================================================
+
+class EsphomeDriver:
+
+    def __init__(self):
+        import esphome_entities
+        from esphome_client import EsphomeClient
+        self._ee = esphome_entities
+        self._c = EsphomeClient(
+            HA_TOKEN, HA_WS_URL,
+            # Looked up at call time: socketio.emit is wrapped for debug logging below
+            emit=lambda event, data=None, **kwargs: socketio.emit(event, data, **kwargs),
+            emit_to_topic=emit_to_topic_subscribers,
+            history=history, history_key=history_key, on_device_list=emit_device_list,
+            on_entities_changed=self._entities_changed, debug=DEBUG)
+
+    @property
+    def mqtt_connected(self):
+        return self._c.connected
+
+    def _entities_changed(self, topics):
+        # An entity was enabled or disabled in Home Assistant: the pages showing that
+        # sensor grey out (or bring back) what depends on it
+        for topic in topics:
+            for sid in get_sessions_for_topic(topic):
+                socketio.start_background_task(_send_device_info, sid, topic)
+
+    @property
+    def last_error(self):
+        return self._c.error
+
+    def start(self):
+        self._c.start()
+
+    def get_device_list_snapshot(self):
+        return self._c.device_list()
+
+    def ieee_for_topic(self, topic):
+        return self._c.ieee_for_topic(topic)
+
+    def device_info(self, topic, force=False):
+        if force:
+            self._c.resync()   # an entity enabled in Home Assistant since shows up after this
+        key = self._c.key_for_topic(topic)
+        return self._c.device_info(key) if key else None
+
+    def diagnostics_parts(self, topic):
+        return self._c.diagnostics(self._c.key_for_topic(topic))
+
+    def _session_device(self, sid, params=None):
+        """The device this browser has selected, or None after telling it why not."""
+        extra = {'params': list(params)} if params else {}
+        with session_topics_lock:
+            topic = session_topics.get(sid)
+        if not topic:
+            socketio.emit('command_error', {'error': 'No device selected', **extra}, to=sid)
+            return None
+        key = self._c.key_for_topic(topic)
+        if not key:
+            socketio.emit('command_error', {'error': 'Device not found in Home Assistant', **extra}, to=sid)
+            return None
+        if not self._c.connected:
+            socketio.emit('command_error', {'error': 'Home Assistant is not connected', **extra}, to=sid)
+            return None
+        return key
+
+    def set_device(self, sid, new_topic):
+        with session_topics_lock:
+            session_topics[sid] = new_topic
+        key = self._c.key_for_topic(new_topic)
+        if key:
+            print(f"Session {sid[:8]} monitoring: {new_topic}", flush=True)
+            self._c.send_snapshot(key, sid)
+        elif new_topic:
+            print(f"ESPHome: unknown device {new_topic}", flush=True)
+
+    def update_parameter(self, sid, param, value):
+        """A zone save from the map or zone list (settings come through update_parameters)."""
+        if param != self._ee.ZONE_CATEGORY:
+            self.update_parameters(sid, {param: value})
+            return
+        zones, error = self._ee.parse_zone_write(value)
+        if error:
+            socketio.emit('command_error', {'error': error, 'param': param}, to=sid)
+            return
+        key = self._session_device(sid, [param])
+        if key:
+            self._c.write_zones(sid, key, zones)
+            socketio.emit('command_ack', {'param': param, 'status': 'sent'}, to=sid)
+
+    def update_parameters(self, sid, params):
+        good, errors, bad = {}, [], []
+        for name, value in params.items():
+            ok, error = self._ee.validate(name, value)
+            if ok:
+                good[name] = value
+            else:
+                errors.append(error)
+                bad.append(name)
+        if bad:
+            socketio.emit('command_error', {'error': ' '.join(errors), 'params': bad}, to=sid)
+        if good:
+            key = self._session_device(sid, list(good))
+            if key:
+                self._c.write_settings(sid, key, good)
+
+    def read_settings(self, sid, keys):
+        """Settings are entity states Home Assistant already has; send the ones asked for."""
+        with session_topics_lock:
+            topic = session_topics.get(sid)
+        key = self._c.key_for_topic(topic) if topic else None
+        if key:
+            self._c.send_settings(key, keys, sid)
+
+    def send_command(self, sid, cmd_action):
+        # Only "report your zones" (2) means anything here: the page asks while it waits
+        # for a zone it saved to show up
+        key = self._session_device(sid)
+        if not key:
+            return
+        if str(cmd_action) == '2':
+            self._c.send_zones(key, sid)
+            socketio.emit('command_ack', {'command': 'query_areas', 'status': 'sent'}, to=sid)
+        else:
+            socketio.emit('command_error', {'error': "This sensor doesn't have that command."}, to=sid)
+
+    def press_button(self, sid, button):
+        if button not in self._ee.BUTTONS:
+            socketio.emit('command_error', {'error': f'Unknown button: {button}'}, to=sid)
+            return
+        key = self._session_device(sid)
+        if key:
+            self._c.press(sid, key, button)
+
+    def force_sync(self, sid):
+        with session_topics_lock:
+            topic = session_topics.get(sid)
+        if not topic:
+            return  # No device selected yet — silent, expected on page load
+        self._c.resync()
+        key = self._c.key_for_topic(topic)
+        if key:
+            self._c.send_snapshot(key, sid)
+
+
+# ===========================================================================
 # Debug-aware socket.io emit wrapper
 #
 # Intercepts every socketio.emit call and prints a truncated preview when
@@ -1298,6 +1454,8 @@ socketio.emit = _debug_emit
 
 if ZIGBEE_STACK == 'zha':
     driver = ZHADriver()
+elif ZIGBEE_STACK == 'esphome':
+    driver = EsphomeDriver()
 else:
     if ZIGBEE_STACK != 'z2m':
         print(f"Warning: unknown zigbee_stack '{ZIGBEE_STACK}', defaulting to z2m.", flush=True)
@@ -1356,7 +1514,10 @@ def handle_connect(auth=None):
     # For ZHA we send optimistic connected=True; ZHAClient will correct it
     # via a mqtt_status emit if the WebSocket is actually down.
     is_connected = True if ZIGBEE_STACK == 'zha' else driver.mqtt_connected
-    emit('mqtt_status', {'connected': is_connected})
+    status = {'connected': is_connected}
+    if not is_connected and getattr(driver, 'last_error', None):
+        status['error'] = driver.last_error      # why the list below is empty
+    emit('mqtt_status', status)
     emit('device_list', device_list_payload())
     emit('stack_info',  {'stack': ZIGBEE_STACK})
 
@@ -1385,6 +1546,12 @@ _device_info_cache = {}
 
 def build_device_info(topic, force=False):
     """Firmware, link quality, update and HA entities for one switch (slow: HA round trips)."""
+    if ZIGBEE_STACK == 'esphome':
+        # All of it is entity states the driver already follows
+        info = driver.device_info(topic, force) or dict(device_info.empty_info('esphome', driver.ieee_for_topic(topic)), found=False)
+        info.update(topic=topic, ha_available=bool(HA_TOKEN), ha_error=None)
+        _device_info_cache[topic] = info
+        return info
     if ZIGBEE_STACK == 'zha':
         ieee, zha_dev, attrs, defined = driver.device_facts(topic, force)
         info = device_info.zha_info(ieee, zha_dev, attrs)
@@ -1589,6 +1756,15 @@ def handle_force_sync():
     driver.force_sync(request.sid)
 
 
+@socketio.on('press_button')
+def handle_press_button(button):
+    """A maintenance button on an ESPHome sensor (restart a radar, calibrate the LD2412)."""
+    if hasattr(driver, 'press_button') and isinstance(button, str):
+        driver.press_button(request.sid, button)
+    else:
+        emit('command_error', {'error': "This device doesn't have that button."})
+
+
 @socketio.on('zwave_capture_start')
 def handle_zwave_capture_start():
     zwave_capture.start()
@@ -1610,11 +1786,15 @@ def handle_zwave_capture_status():
 
 @app.route('/')
 def index():
+    esphome = ZIGBEE_STACK == 'esphome'
     return render_template(
         'index.html',
         ingress_path=request.headers.get('X-Ingress-Path', ''),
         zigbee_stack=ZIGBEE_STACK,
         version=ADDON_VERSION,
+        esphome=esphome,
+        dev='sensor' if esphome else 'switch',     # what the page calls the device
+        devs='sensors' if esphome else 'switches',
     )
 
 

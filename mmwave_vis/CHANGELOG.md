@@ -1,6 +1,19 @@
 # Changelog
 
 
+## [4.3.0] - 2026-11-22
+
+### Added
+- Apollo R PRO-1 support: the PoE dual mmWave multisensor (LD2450 + LD2412) through its ESPHome entities in Home Assistant. Set `zigbee_stack` to `esphome`; no MQTT, quirk or firmware change is needed. See APOLLO.md.
+  - Live map of the people the LD2450 tracks, with their speed and distance, and chips showing which of the two radars sees someone.
+  - The LD2450's three zones can be drawn, named, backed up and undone like a switch's, and its zone type (off, detection, filter) is at the top of the Zones tab. Each zone lists its target count entity and lights up while someone is in it.
+  - The LD2412's moving and still distances are drawn as arcs on the map once those two sensors are enabled in Home Assistant.
+  - Radars tab: both presence timeouts and the LD2412's 14 gates as energy bars against their thresholds (engineering mode), plus calibrate, restart and factory reset for each radar.
+  - Config tab: both radars' settings, including every gate threshold. Settings whose entity is disabled in Home Assistant are greyed out.
+  - Display tab: "Mirror left and right" for a sensor that counts left and right the other way round, saved with the room layout.
+  - Lengths are converted from whatever unit Home Assistant shows the sensor's entities in (inches on a US-customary install).
+- Standalone Docker: without a Supervisor, `HA_URL` and `HA_TOKEN` are used to reach Home Assistant directly for the ESPHome mode.
+
 ## [4.2.2] - 2026-10-28
 
 ### Added

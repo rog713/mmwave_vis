@@ -2,7 +2,7 @@
 // and light changes, and replaying what the radar saw around one of them.
 // The addon records it in the background (off until turned on here).
 
-import { state, on, emit, zoneName } from './state.js';
+import { state, on, emit, zoneName, AREA_CATEGORY, ESPHOME, DEV } from './state.js';
 import * as prefs from './prefs.js';
 import { $, $$, h, setText, toast, confirmAction, plural, clockTime, dayLabel, shortDateTime, duration } from './ui.js';
 
@@ -177,7 +177,7 @@ function describe(e) {
             if (!e.value && e.last_detect_ms) detail = `${duration((e.t_ms - e.last_detect_ms) / 1000)} after the last target`;
             break;
         case 'area':
-            title = `${zoneName('mmwave_detection_areas', `area${e.area}`)} ${e.value ? 'occupied' : 'clear'}`;
+            title = `${zoneName(AREA_CATEGORY, `area${e.area}`)} ${e.value ? 'occupied' : 'clear'}`;
             break;
         case 'light':
             title = e.value ? 'Light on' : 'Light off';
@@ -295,7 +295,7 @@ function startReplay(e) {
         if (topic !== state.device) return;
         const clip = ack && ack.clip;
         if (!clip || !clip.frames || !clip.frames.length) {
-            toast('No positions were recorded around then. Target reporting was probably off.', 'error', 6000);
+            toast(ESPHOME ? 'No positions were recorded around then.' : 'No positions were recorded around then. Target reporting was probably off.', 'error', 6000);
             return;
         }
         if (state.arranging) emit('arrange', false);
@@ -376,8 +376,8 @@ export function initHistory(radarInstance) {
     });
 
     $('#btnClearHistory').addEventListener('click', async () => {
-        if (!state.device) { toast('Choose a switch first.', 'error'); return; }
-        if (!await confirmAction(`Delete all recorded history for "${state.deviceName}"? The heat map and timeline for this switch start over.`, { confirm: 'Delete', danger: true })) return;
+        if (!state.device) { toast(`Choose a ${DEV} first.`, 'error'); return; }
+        if (!await confirmAction(`Delete all recorded history for "${state.deviceName}"? The heat map and timeline for this ${DEV} start over.`, { confirm: 'Delete', danger: true })) return;
         socket().emit('clear_history', state.device, ack => {
             if (ack && ack.error) toast(ack.error, 'error');
             else toast('History cleared.', 'success');

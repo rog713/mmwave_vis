@@ -26,9 +26,19 @@ class HAConnectionError(HAError):
     stopped answering): unlike a refused command, nothing more can be sent on it."""
 
 
-def ws_url(ha_url):
-    # The Supervisor proxy URL is fixed; ha_url only says whether it's TLS
-    return ("wss" if (ha_url or "").startswith("https") else "ws") + "://supervisor/core/websocket"
+def ws_url(ha_url, direct=False):
+    """Where Home Assistant's WebSocket API is.
+
+    As an addon it's always the Supervisor's proxy: ha_url only says whether it's TLS.
+    `direct`: there's no Supervisor (standalone Docker), so ha_url is Home Assistant
+    itself, e.g. http://homeassistant.local:8123.
+    """
+    url = (ha_url or "").strip()
+    scheme = "wss" if url.startswith("https") else "ws"
+    parts = urllib.parse.urlsplit(url)
+    if not direct or not parts.netloc or parts.hostname == "supervisor":
+        return f"{scheme}://supervisor/core/websocket"
+    return f"{scheme}://{parts.netloc}{parts.path.rstrip('/')}/api/websocket"
 
 
 class HAConnection:

@@ -253,6 +253,26 @@ def test_zone_names():
     assert normalize_zone_names([1])[1]
 
 
+def test_zone_names_for_an_esphome_sensors_zones():
+    names, err = normalize_zone_names({"ld2450_zones:area1": "Sofa", "ld2450_zones:area3": " Desk ", "ld2450:area1": "nope"})
+    assert err is None
+    assert names == {"ld2450_zones:area1": "Sofa", "ld2450_zones:area3": "Desk"}
+
+
+def test_websocket_url():
+    # As an addon it's always the Supervisor's proxy, whatever ha_url says
+    assert ha_ws.ws_url("http://supervisor") == "ws://supervisor/core/websocket"
+    assert ha_ws.ws_url("https://ha.example.com") == "wss://supervisor/core/websocket"
+    assert ha_ws.ws_url("http://homeassistant.local:8123") == "ws://supervisor/core/websocket"
+    assert ha_ws.ws_url("") == "ws://supervisor/core/websocket"
+    assert ha_ws.ws_url(None, direct=True) == "ws://supervisor/core/websocket"
+    # Standalone (no Supervisor token): ha_url is Home Assistant itself
+    assert ha_ws.ws_url("http://homeassistant.local:8123", direct=True) == "ws://homeassistant.local:8123/api/websocket"
+    assert ha_ws.ws_url("https://ha.example.com/", direct=True) == "wss://ha.example.com/api/websocket"
+    assert ha_ws.ws_url("http://10.0.0.5:8123/ha/", direct=True) == "ws://10.0.0.5:8123/ha/api/websocket"
+    assert ha_ws.ws_url("http://supervisor", direct=True) == "ws://supervisor/core/websocket"
+
+
 def test_switch_names():
     assert normalize_switch_name("  Kitchen\n island\x07 ") == ("Kitchen island", None)
     assert normalize_switch_name("K" * 80) == ("K" * 60, None)

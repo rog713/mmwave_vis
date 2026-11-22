@@ -2,7 +2,7 @@
 // Zigbee signal and firmware updates (top of the Config tab, and a line in the
 // status popover).
 
-import { state, on, emit } from './state.js';
+import { state, on, emit, ESPHOME, DEV } from './state.js';
 import { $, h, setText, toast, copyText, shortDateTime } from './ui.js';
 import { cleanName } from './names.js';
 
@@ -55,14 +55,16 @@ function render() {
     const root = $('#switchInfo');
     const info = state.deviceInfo && state.deviceInfo.topic === state.device ? state.deviceInfo : null;
     setText($('#popFirmware'), info ? firmwareText(info) : '–');
-    if (!state.device) { root.replaceChildren(h('p', { class: 'hint' }, 'Choose a switch.')); return; }
-    if (!info) { root.replaceChildren(h('p', { class: 'hint' }, 'Reading the switch\'s details…')); return; }
+    if (!state.device) { root.replaceChildren(h('p', { class: 'hint' }, `Choose a ${DEV}.`)); return; }
+    if (!info) { root.replaceChildren(h('p', { class: 'hint' }, `Reading the ${DEV}'s details…`)); return; }
 
     const items = [];
+    if (info.model) items.push(...row('Model', info.model));
     items.push(...row('Firmware', firmwareText(info)));
     if (info.mmwave_version) {
-        items.push(...row('mmWave module', h('span', { title: info.mmwave_version.raw }, info.mmwave_version.text)));
+        items.push(...row(ESPHOME ? 'Radar firmware' : 'mmWave module', h('span', { title: info.mmwave_version.raw }, info.mmwave_version.text)));
     }
+    if (info.ip_address) items.push(...row('IP address', info.ip_address));
     const signal = signalText(info);
     if (signal) {
         const weak = info.link.lqi != null && info.link.lqi < WEAK_LQI;
@@ -78,11 +80,16 @@ function render() {
         items.push(...row('Update', up.in_progress ? 'Installing…'
             : up.available ? h('strong', { class: 'warn-text' }, `${up.latest} available`) : 'Up to date'));
     }
-    const occ = info.entities && info.entities.occupancy;
-    if (occ) {
-        items.push(...row('Occupancy entity', h('code', null, occ),
+    // An ESPHome sensor has a presence entity per radar
+    const entities = info.entities || {};
+    const presence = ESPHOME
+        ? [['LD2450 presence entity', entities.ld2450_presence], ['LD2412 presence entity', entities.ld2412_presence]]
+        : [['Occupancy entity', entities.occupancy]];
+    for (const [label, id] of presence) {
+        if (!id) continue;
+        items.push(...row(label, h('code', null, id),
             h('button', { class: 'btn link', type: 'button', onclick: async () => {
-                if (await copyText(occ)) toast(`Copied ${occ}.`, 'success', 2500);
+                if (await copyText(id)) toast(`Copied ${id}.`, 'success', 2500);
             } }, 'Copy'), true));
     }
 
@@ -94,8 +101,15 @@ function render() {
     if (state.stack === 'zha' && unsupported) {
         notes.push(h('p', { class: 'hint' }, `This switch's quirk doesn't have ${unsupported === 1 ? '1 setting' : `${unsupported} settings`}, so ${unsupported === 1 ? "it's" : "they're"} greyed out below.`));
     }
+    if (ESPHOME && info.found === false) {
+        notes.push(h('p', { class: 'hint warn-text' }, 'Home Assistant doesn\'t list this sensor at the moment. Check the ESPHome integration, then press Sync.'));
+    }
+    if (ESPHOME && unsupported) {
+        notes.push(h('p', { class: 'hint' }, `${unsupported === 1 ? '1 setting is' : `${unsupported} settings are`} greyed out below because ${unsupported === 1 ? 'its entity is' : 'their entities are'} disabled in Home Assistant. Enable them on the device's page there, wait half a minute, then press Refresh.`));
+    }
     if (!info.ha_available) {
-        notes.push(h('p', { class: 'hint' }, 'Running without Home Assistant, so update and entity details aren\'t available.'));
+        notes.push(h('p', { class: 'hint' }, ESPHOME ? 'The addon has no Home Assistant token, so it can\'t reach the sensor.'
+            : 'Running without Home Assistant, so update and entity details aren\'t available.'));
     } else if (info.ha_error) {
         notes.push(h('p', { class: 'hint' }, `Couldn't read Home Assistant's device list: ${info.ha_error}`));
     }
@@ -112,7 +126,7 @@ function render() {
 function refresh() {
     if (!state.device) return;
     state.socket.emit('refresh_device_info', state.device);
-    toast('Reading the switch\'s details again…', 'info', 2500);
+    toast(`Reading the ${DEV}'s details again…`, 'info', 2500);
 }
 
 // --- Name in the switch list (display only; the addon keeps it for every browser) ---
@@ -126,7 +140,7 @@ function renderName() {
     nameInput.placeholder = d ? d.default_label : '';
     let hint = '';
     if (d) {
-        hint = 'Shown in the switch list. Leave it empty to use ' + (state.stack === 'zha' ? 'its name in Home Assistant.'
+        hint = `Shown in the ${DEV} list. Leave it empty to use ` + (state.stack === 'zha' || ESPHOME ? 'its name in Home Assistant.'
             : d.description ? 'its description in Zigbee2MQTT.' : 'its name in Zigbee2MQTT.');
     }
     setText($('#switchNameHint'), hint);

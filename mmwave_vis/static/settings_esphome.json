@@ -1,0 +1,551 @@
+{
+ "groups": [
+  {
+   "id": "ld2450",
+   "title": "Tracking radar (LD2450)",
+   "help": "The LD2450 follows up to three people and reports where each one is. It's what draws the dots on the map. Its zones are drawn in the Zones tab."
+  },
+  {
+   "id": "ld2412",
+   "title": "Presence radar (LD2412)",
+   "help": "The LD2412 only measures distance, but it's fast and good at noticing someone sitting still. It splits its range into 14 gates; the two groups below set how sensitive each gate is."
+  },
+  {
+   "id": "ld2412_move",
+   "title": "LD2412 motion sensitivity by gate",
+   "help": "Each gate is a slice of distance: gate N starts N times the distance resolution from the sensor (0.75 m unless you changed it). The radar reports motion in a gate when the energy it measures there is above this threshold, so a lower number is more sensitive and at 100 a gate practically never triggers. Turn on engineering mode to watch each gate's energy in the Radars tab."
+  },
+  {
+   "id": "ld2412_still",
+   "title": "LD2412 stillness sensitivity by gate",
+   "help": "The same gates, for someone who isn't moving. Lower is more sensitive; raise a gate that stays on in an empty room."
+  }
+ ],
+ "settings": [
+  {
+   "key": "ld2450_timeout",
+   "entity": "number.ld2450_timeout",
+   "group": "ld2450",
+   "title": "Presence timeout",
+   "control": "number",
+   "min": 0,
+   "max": 3600,
+   "format": "seconds",
+   "help": "How long LD2450 Presence stays on after the radar stops seeing anyone, in seconds. The moving and still target sensors use it too.\n\nA short timeout clears the room quickly; a longer one rides out the moments the radar loses someone who sits very still."
+  },
+  {
+   "key": "ld2450_zone_type",
+   "entity": "select.ld2450_zone_type",
+   "group": "ld2450",
+   "title": "Zone type",
+   "control": "select",
+   "default": "Disabled",
+   "options": [
+    {
+     "value": "Disabled",
+     "label": "Off: zones only count people"
+    },
+    {
+     "value": "Detection",
+     "label": "Detection: only track inside the zones"
+    },
+    {
+     "value": "Filter",
+     "label": "Filter: ignore everything inside the zones"
+    }
+   ],
+   "help": "What the radar itself does with the three zones. It applies to all of them at once.\n\nOff: the radar tracks everywhere, and each zone still counts the people inside it. Detection: the radar only reports people inside a zone. Filter: the radar ignores anything inside a zone, for a fan, a curtain or a doorway onto a hallway.\n\nThe same setting is at the top of the Zones tab."
+  },
+  {
+   "key": "ld2450_multi_target",
+   "entity": "switch.ld2450_multi_target_tracking",
+   "group": "ld2450",
+   "title": "Track several people",
+   "control": "toggle",
+   "on": "ON",
+   "options": [
+    {
+     "value": "OFF",
+     "label": "Off"
+    },
+    {
+     "value": "ON",
+     "label": "On"
+    }
+   ],
+   "default": "ON",
+   "help": "On, the radar follows up to three people. Off, it follows only one, which can be steadier in a room one person uses."
+  },
+  {
+   "key": "ld2450_bluetooth",
+   "entity": "switch.ld2450_bluetooth",
+   "group": "ld2450",
+   "title": "Radar module Bluetooth",
+   "control": "toggle",
+   "on": "ON",
+   "options": [
+    {
+     "value": "OFF",
+     "label": "Off"
+    },
+    {
+     "value": "ON",
+     "label": "On"
+    }
+   ],
+   "help": "The LD2450 module's own Bluetooth, used by the HLKRadarTool phone app. It has nothing to do with the sensor's Bluetooth proxy. Turn it off when you don't use the app, so nobody nearby can change the radar's settings."
+  },
+  {
+   "key": "ld2412_timeout",
+   "entity": "number.ld2412_timeout",
+   "group": "ld2412",
+   "title": "Presence timeout",
+   "control": "number",
+   "min": 0,
+   "max": 900,
+   "format": "seconds",
+   "help": "How long LD2412 Presence stays on after the radar stops seeing anyone, in seconds."
+  },
+  {
+   "key": "ld2412_min_distance_gate",
+   "entity": "number.ld2412_min_distance_gate",
+   "group": "ld2412",
+   "title": "Nearest gate",
+   "control": "number",
+   "min": 1,
+   "max": 12,
+   "help": "The first gate the radar uses. Raise it to ignore things right in front of the sensor. It has to be below the farthest gate."
+  },
+  {
+   "key": "ld2412_max_distance_gate",
+   "entity": "number.ld2412_max_distance_gate",
+   "group": "ld2412",
+   "title": "Farthest gate",
+   "control": "number",
+   "min": 2,
+   "max": 13,
+   "help": "The last gate the radar uses. Lower it so the radar doesn't see through a doorway or a thin wall: at the default 0.75 m resolution, gate 6 ends 5.25 m away."
+  },
+  {
+   "key": "ld2412_distance_resolution",
+   "entity": "select.ld2412_distance_resolution",
+   "group": "ld2412",
+   "title": "Distance resolution",
+   "control": "select",
+   "default": "0.75m",
+   "options": [
+    {
+     "value": "0.75m",
+     "label": "0.75 m per gate (about 10 m range)"
+    },
+    {
+     "value": "0.5m",
+     "label": "0.5 m per gate (about 7 m range)"
+    },
+    {
+     "value": "0.2m",
+     "label": "0.2 m per gate (about 2.8 m range)"
+    }
+   ],
+   "risky": "Changing the distance resolution restarts the LD2412 and changes how far every gate reaches, so the gate thresholds will need another look.",
+   "help": "How deep each gate is. Smaller gates give finer control close to the sensor at the cost of range."
+  },
+  {
+   "key": "ld2412_engineering_mode",
+   "entity": "switch.ld2412_engineering_mode",
+   "group": "ld2412",
+   "title": "Engineering mode",
+   "control": "toggle",
+   "on": "ON",
+   "options": [
+    {
+     "value": "OFF",
+     "label": "Off"
+    },
+    {
+     "value": "ON",
+     "label": "On"
+    }
+   ],
+   "help": "Makes the radar report the energy it measures in every gate, shown in the Radars tab, so you can see which gates a person or a fan lights up and set the thresholds to match. Turn it off when you're done: it sends a lot of updates to Home Assistant."
+  },
+  {
+   "key": "ld2412_bluetooth",
+   "entity": "switch.ld2412_bluetooth",
+   "group": "ld2412",
+   "title": "Radar module Bluetooth",
+   "control": "toggle",
+   "on": "ON",
+   "options": [
+    {
+     "value": "OFF",
+     "label": "Off"
+    },
+    {
+     "value": "ON",
+     "label": "On"
+    }
+   ],
+   "help": "The LD2412 module's own Bluetooth, used by the HLKRadarTool phone app. Turn it off when you don't use the app."
+  },
+  {
+   "key": "ld2412_light_function",
+   "entity": "select.ld2412_light_function",
+   "group": "ld2412",
+   "title": "Light condition for the output pin",
+   "control": "select",
+   "default": "off",
+   "options": [
+    {
+     "value": "off",
+     "label": "Off"
+    },
+    {
+     "value": "below",
+     "label": "Only when darker than the threshold"
+    },
+    {
+     "value": "above",
+     "label": "Only when brighter than the threshold"
+    }
+   ],
+   "help": "Lets the radar's own light sensor gate its hardware output pin. It doesn't change the presence sensors in Home Assistant."
+  },
+  {
+   "key": "ld2412_light_threshold",
+   "entity": "number.ld2412_light_threshold",
+   "group": "ld2412",
+   "title": "Light threshold",
+   "control": "number",
+   "min": 0,
+   "max": 255,
+   "help": "The light level, 0 to 255 on the radar's own scale, that the light condition compares against."
+  },
+  {
+   "key": "ld2412_out_pin_level",
+   "entity": "select.ld2412_hardware_output_pin_level",
+   "group": "ld2412",
+   "title": "Output pin level",
+   "control": "select",
+   "options": [
+    {
+     "value": "low",
+     "label": "Low when present"
+    },
+    {
+     "value": "high",
+     "label": "High when present"
+    }
+   ],
+   "help": "Which way the radar's hardware output pin goes when it detects someone. It only matters for the LD2412 Out Pin sensor."
+  },
+  {
+   "key": "ld2412_g00_move_threshold",
+   "entity": "number.ld2412_g00_move_threshold",
+   "group": "ld2412_move",
+   "title": "Gate 0 motion",
+   "control": "number",
+   "min": 0,
+   "max": 100,
+   "format": "percent",
+   "help": "Motion threshold for gate 0: about 0 to 0.75 m from the sensor at the default 0.75 m resolution. Lower is more sensitive."
+  },
+  {
+   "key": "ld2412_g01_move_threshold",
+   "entity": "number.ld2412_g01_move_threshold",
+   "group": "ld2412_move",
+   "title": "Gate 1 motion",
+   "control": "number",
+   "min": 0,
+   "max": 100,
+   "format": "percent",
+   "help": "Motion threshold for gate 1: about 0.75 to 1.5 m from the sensor at the default 0.75 m resolution. Lower is more sensitive."
+  },
+  {
+   "key": "ld2412_g02_move_threshold",
+   "entity": "number.ld2412_g02_move_threshold",
+   "group": "ld2412_move",
+   "title": "Gate 2 motion",
+   "control": "number",
+   "min": 0,
+   "max": 100,
+   "format": "percent",
+   "help": "Motion threshold for gate 2: about 1.5 to 2.25 m from the sensor at the default 0.75 m resolution. Lower is more sensitive."
+  },
+  {
+   "key": "ld2412_g03_move_threshold",
+   "entity": "number.ld2412_g03_move_threshold",
+   "group": "ld2412_move",
+   "title": "Gate 3 motion",
+   "control": "number",
+   "min": 0,
+   "max": 100,
+   "format": "percent",
+   "help": "Motion threshold for gate 3: about 2.25 to 3 m from the sensor at the default 0.75 m resolution. Lower is more sensitive."
+  },
+  {
+   "key": "ld2412_g04_move_threshold",
+   "entity": "number.ld2412_g04_move_threshold",
+   "group": "ld2412_move",
+   "title": "Gate 4 motion",
+   "control": "number",
+   "min": 0,
+   "max": 100,
+   "format": "percent",
+   "help": "Motion threshold for gate 4: about 3 to 3.75 m from the sensor at the default 0.75 m resolution. Lower is more sensitive."
+  },
+  {
+   "key": "ld2412_g05_move_threshold",
+   "entity": "number.ld2412_g05_move_threshold",
+   "group": "ld2412_move",
+   "title": "Gate 5 motion",
+   "control": "number",
+   "min": 0,
+   "max": 100,
+   "format": "percent",
+   "help": "Motion threshold for gate 5: about 3.75 to 4.5 m from the sensor at the default 0.75 m resolution. Lower is more sensitive."
+  },
+  {
+   "key": "ld2412_g06_move_threshold",
+   "entity": "number.ld2412_g06_move_threshold",
+   "group": "ld2412_move",
+   "title": "Gate 6 motion",
+   "control": "number",
+   "min": 0,
+   "max": 100,
+   "format": "percent",
+   "help": "Motion threshold for gate 6: about 4.5 to 5.25 m from the sensor at the default 0.75 m resolution. Lower is more sensitive."
+  },
+  {
+   "key": "ld2412_g07_move_threshold",
+   "entity": "number.ld2412_g07_move_threshold",
+   "group": "ld2412_move",
+   "title": "Gate 7 motion",
+   "control": "number",
+   "min": 0,
+   "max": 100,
+   "format": "percent",
+   "help": "Motion threshold for gate 7: about 5.25 to 6 m from the sensor at the default 0.75 m resolution. Lower is more sensitive."
+  },
+  {
+   "key": "ld2412_g08_move_threshold",
+   "entity": "number.ld2412_g08_move_threshold",
+   "group": "ld2412_move",
+   "title": "Gate 8 motion",
+   "control": "number",
+   "min": 0,
+   "max": 100,
+   "format": "percent",
+   "help": "Motion threshold for gate 8: about 6 to 6.75 m from the sensor at the default 0.75 m resolution. Lower is more sensitive."
+  },
+  {
+   "key": "ld2412_g09_move_threshold",
+   "entity": "number.ld2412_g09_move_threshold",
+   "group": "ld2412_move",
+   "title": "Gate 9 motion",
+   "control": "number",
+   "min": 0,
+   "max": 100,
+   "format": "percent",
+   "help": "Motion threshold for gate 9: about 6.75 to 7.5 m from the sensor at the default 0.75 m resolution. Lower is more sensitive."
+  },
+  {
+   "key": "ld2412_g10_move_threshold",
+   "entity": "number.ld2412_g10_move_threshold",
+   "group": "ld2412_move",
+   "title": "Gate 10 motion",
+   "control": "number",
+   "min": 0,
+   "max": 100,
+   "format": "percent",
+   "help": "Motion threshold for gate 10: about 7.5 to 8.25 m from the sensor at the default 0.75 m resolution. Lower is more sensitive."
+  },
+  {
+   "key": "ld2412_g11_move_threshold",
+   "entity": "number.ld2412_g11_move_threshold",
+   "group": "ld2412_move",
+   "title": "Gate 11 motion",
+   "control": "number",
+   "min": 0,
+   "max": 100,
+   "format": "percent",
+   "help": "Motion threshold for gate 11: about 8.25 to 9 m from the sensor at the default 0.75 m resolution. Lower is more sensitive."
+  },
+  {
+   "key": "ld2412_g12_move_threshold",
+   "entity": "number.ld2412_g12_move_threshold",
+   "group": "ld2412_move",
+   "title": "Gate 12 motion",
+   "control": "number",
+   "min": 0,
+   "max": 100,
+   "format": "percent",
+   "help": "Motion threshold for gate 12: about 9 to 9.75 m from the sensor at the default 0.75 m resolution. Lower is more sensitive."
+  },
+  {
+   "key": "ld2412_g13_move_threshold",
+   "entity": "number.ld2412_g13_move_threshold",
+   "group": "ld2412_move",
+   "title": "Gate 13 motion",
+   "control": "number",
+   "min": 0,
+   "max": 100,
+   "format": "percent",
+   "help": "Motion threshold for gate 13: about 9.75 to 10.5 m from the sensor at the default 0.75 m resolution. Lower is more sensitive."
+  },
+  {
+   "key": "ld2412_g00_still_threshold",
+   "entity": "number.ld2412_g00_still_threshold",
+   "group": "ld2412_still",
+   "title": "Gate 0 stillness",
+   "control": "number",
+   "min": 0,
+   "max": 100,
+   "format": "percent",
+   "help": "Stillness threshold for gate 0: about 0 to 0.75 m from the sensor at the default 0.75 m resolution. Lower is more sensitive."
+  },
+  {
+   "key": "ld2412_g01_still_threshold",
+   "entity": "number.ld2412_g01_still_threshold",
+   "group": "ld2412_still",
+   "title": "Gate 1 stillness",
+   "control": "number",
+   "min": 0,
+   "max": 100,
+   "format": "percent",
+   "help": "Stillness threshold for gate 1: about 0.75 to 1.5 m from the sensor at the default 0.75 m resolution. Lower is more sensitive."
+  },
+  {
+   "key": "ld2412_g02_still_threshold",
+   "entity": "number.ld2412_g02_still_threshold",
+   "group": "ld2412_still",
+   "title": "Gate 2 stillness",
+   "control": "number",
+   "min": 0,
+   "max": 100,
+   "format": "percent",
+   "help": "Stillness threshold for gate 2: about 1.5 to 2.25 m from the sensor at the default 0.75 m resolution. Lower is more sensitive."
+  },
+  {
+   "key": "ld2412_g03_still_threshold",
+   "entity": "number.ld2412_g03_still_threshold",
+   "group": "ld2412_still",
+   "title": "Gate 3 stillness",
+   "control": "number",
+   "min": 0,
+   "max": 100,
+   "format": "percent",
+   "help": "Stillness threshold for gate 3: about 2.25 to 3 m from the sensor at the default 0.75 m resolution. Lower is more sensitive."
+  },
+  {
+   "key": "ld2412_g04_still_threshold",
+   "entity": "number.ld2412_g04_still_threshold",
+   "group": "ld2412_still",
+   "title": "Gate 4 stillness",
+   "control": "number",
+   "min": 0,
+   "max": 100,
+   "format": "percent",
+   "help": "Stillness threshold for gate 4: about 3 to 3.75 m from the sensor at the default 0.75 m resolution. Lower is more sensitive."
+  },
+  {
+   "key": "ld2412_g05_still_threshold",
+   "entity": "number.ld2412_g05_still_threshold",
+   "group": "ld2412_still",
+   "title": "Gate 5 stillness",
+   "control": "number",
+   "min": 0,
+   "max": 100,
+   "format": "percent",
+   "help": "Stillness threshold for gate 5: about 3.75 to 4.5 m from the sensor at the default 0.75 m resolution. Lower is more sensitive."
+  },
+  {
+   "key": "ld2412_g06_still_threshold",
+   "entity": "number.ld2412_g06_still_threshold",
+   "group": "ld2412_still",
+   "title": "Gate 6 stillness",
+   "control": "number",
+   "min": 0,
+   "max": 100,
+   "format": "percent",
+   "help": "Stillness threshold for gate 6: about 4.5 to 5.25 m from the sensor at the default 0.75 m resolution. Lower is more sensitive."
+  },
+  {
+   "key": "ld2412_g07_still_threshold",
+   "entity": "number.ld2412_g07_still_threshold",
+   "group": "ld2412_still",
+   "title": "Gate 7 stillness",
+   "control": "number",
+   "min": 0,
+   "max": 100,
+   "format": "percent",
+   "help": "Stillness threshold for gate 7: about 5.25 to 6 m from the sensor at the default 0.75 m resolution. Lower is more sensitive."
+  },
+  {
+   "key": "ld2412_g08_still_threshold",
+   "entity": "number.ld2412_g08_still_threshold",
+   "group": "ld2412_still",
+   "title": "Gate 8 stillness",
+   "control": "number",
+   "min": 0,
+   "max": 100,
+   "format": "percent",
+   "help": "Stillness threshold for gate 8: about 6 to 6.75 m from the sensor at the default 0.75 m resolution. Lower is more sensitive."
+  },
+  {
+   "key": "ld2412_g09_still_threshold",
+   "entity": "number.ld2412_g09_still_threshold",
+   "group": "ld2412_still",
+   "title": "Gate 9 stillness",
+   "control": "number",
+   "min": 0,
+   "max": 100,
+   "format": "percent",
+   "help": "Stillness threshold for gate 9: about 6.75 to 7.5 m from the sensor at the default 0.75 m resolution. Lower is more sensitive."
+  },
+  {
+   "key": "ld2412_g10_still_threshold",
+   "entity": "number.ld2412_g10_still_threshold",
+   "group": "ld2412_still",
+   "title": "Gate 10 stillness",
+   "control": "number",
+   "min": 0,
+   "max": 100,
+   "format": "percent",
+   "help": "Stillness threshold for gate 10: about 7.5 to 8.25 m from the sensor at the default 0.75 m resolution. Lower is more sensitive."
+  },
+  {
+   "key": "ld2412_g11_still_threshold",
+   "entity": "number.ld2412_g11_still_threshold",
+   "group": "ld2412_still",
+   "title": "Gate 11 stillness",
+   "control": "number",
+   "min": 0,
+   "max": 100,
+   "format": "percent",
+   "help": "Stillness threshold for gate 11: about 8.25 to 9 m from the sensor at the default 0.75 m resolution. Lower is more sensitive."
+  },
+  {
+   "key": "ld2412_g12_still_threshold",
+   "entity": "number.ld2412_g12_still_threshold",
+   "group": "ld2412_still",
+   "title": "Gate 12 stillness",
+   "control": "number",
+   "min": 0,
+   "max": 100,
+   "format": "percent",
+   "help": "Stillness threshold for gate 12: about 9 to 9.75 m from the sensor at the default 0.75 m resolution. Lower is more sensitive."
+  },
+  {
+   "key": "ld2412_g13_still_threshold",
+   "entity": "number.ld2412_g13_still_threshold",
+   "group": "ld2412_still",
+   "title": "Gate 13 stillness",
+   "control": "number",
+   "min": 0,
+   "max": 100,
+   "format": "percent",
+   "help": "Stillness threshold for gate 13: about 9.75 to 10.5 m from the sensor at the default 0.75 m resolution. Lower is more sensitive."
+  }
+ ]
+}

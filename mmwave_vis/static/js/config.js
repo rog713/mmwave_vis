@@ -4,7 +4,7 @@
 // converts them. Changes are queued (orange dot) and sent with Apply (changes.js);
 // a change counts as saved when the switch reports the new value back.
 
-import { state, on } from './state.js';
+import { state, on, ESPHOME, DEV } from './state.js';
 import * as prefs from './prefs.js';
 import { $, h, setText, duration, infoButton, toast } from './ui.js';
 import * as changes from './changes.js';
@@ -43,7 +43,7 @@ const isChanged = (s, value) => !s.readOnly && value !== undefined && value !== 
 // Why a setting can't be changed here, or '' if it can
 function unavailable(s) {
     if (s.readOnly) return '';
-    if (unsupported.has(s.key)) return 'The ZHA quirk running this switch can\'t change this';
+    if (unsupported.has(s.key)) return ESPHOME ? 'Its entity is disabled or missing in Home Assistant' : 'The ZHA quirk running this switch can\'t change this';
     if (s.needsRadar && !state.radarReports) return 'Needs the Visualizer\'s ZHA quirk';
     return '';
 }
@@ -131,7 +131,9 @@ function buildRow(s) {
     const meta = [];
     if (!s.readOnly && s.default !== undefined) meta.push(`Default: ${describe(s, s.default) || s.default}${s.options ? '' : ` (${s.default})`}.`);
     if (s.control === 'number' && !s.readOnly) meta.push(`Range ${s.min} to ${s.max}.`);
-    meta.push(`Parameter ${s.param}, ${s.key}.`);
+    if (s.param !== undefined) meta.push(`Parameter ${s.param}, ${s.key}.`);
+    // An ESPHome sensor's setting is an entity; its id ends in the name the firmware gave it
+    else if (s.entity) meta.push(`In Home Assistant: ${s.entity.replace('.', '.…_')}.`);
     const info = h('div', { class: 'info-panel', id: infoId, hidden: true },
         s.help.split('\n\n').map(p => h('p', null, p)),
         s.quirkUpdate ? h('p', { class: 'zha-only' }, 'Older copies of the Visualizer\'s ZHA quirk don\'t have this: copy the current files over them. ZHA\'s built-in quirk has it.') : null,
@@ -333,7 +335,8 @@ function readAll() {
         renderReading();
         giveUpLater(keys);
     } else {
-        setText($('#cfgStatus'), 'Asked the switch for every setting; any that changed update as it answers.');
+        setText($('#cfgStatus'), ESPHOME ? 'Read every setting from Home Assistant again.'
+            : 'Asked the switch for every setting; any that changed update as it answers.');
     }
 }
 
@@ -361,7 +364,7 @@ function gotValues(keys) {
 // is a radio read, so only open groups.
 function readOnOpen() {
     if (waitingForState || !catalog) return;
-    readMissing(groups.filter(x => x.el.open || state.stack === 'z2m').flatMap(x => x.keys));
+    readMissing(groups.filter(x => x.el.open || state.stack !== 'zha').flatMap(x => x.keys));
 }
 
 // `late`: nothing came in time. Zigbee2MQTT then has nothing for the switch (it's
@@ -378,7 +381,7 @@ function stateArrived(late = false) {
 // The person changed a control: queue it (or put the control back if it can't take that)
 function edit(r, value) {
     const key = r.s.key;
-    if (!state.device) toast('Choose a switch first.', 'error');
+    if (!state.device) toast(`Choose a ${DEV} first.`, 'error');
     if (!state.device || unavailable(r.s)) { render(r, true); return; }
     const v = changes.check(key, value);
     if (v === null) { render(r, true); return; }

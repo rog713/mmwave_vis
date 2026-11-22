@@ -25,20 +25,23 @@
     <link rel="modulepreload" href="{{ ingress_path }}/assets/js/switchinfo.js">
     <link rel="modulepreload" href="{{ ingress_path }}/assets/js/config.js">
     <link rel="modulepreload" href="{{ ingress_path }}/assets/js/changes.js">
+    <link rel="modulepreload" href="{{ ingress_path }}/assets/js/esphome.js">
     <!-- The Config tab's settings catalogue: fetched alongside the modules, not after them -->
-    <link rel="preload" href="{{ ingress_path }}/assets/settings.json?v={{ version }}" as="fetch" crossorigin="anonymous">
+    {#- An ESPHome sensor has its own: the two radars' settings rather than the switch's parameters #}
+    {%- set catalog_url %}{% if esphome %}{{ ingress_path }}/assets/settings_esphome.json?v={{ version }}{% else %}{{ ingress_path }}/assets/settings.json?v={{ version }}{% endif %}{% endset %}
+    <link rel="preload" href="{{ catalog_url }}" as="fetch" crossorigin="anonymous">
 </head>
-<body class="stack-{{ zigbee_stack }}" data-ingress="{{ ingress_path }}" data-catalog="{{ ingress_path }}/assets/settings.json?v={{ version }}">
+<body class="stack-{{ zigbee_stack }}" data-ingress="{{ ingress_path }}" data-catalog="{{ catalog_url }}">
 
 <header class="topbar">
     <h1 class="brand">mmWave Visualizer</h1>
-    <label class="sr-only" for="deviceSelect">Switch</label>
-    <select id="deviceSelect"><option value="" disabled selected>Loading switches…</option></select>
+    <label class="sr-only" for="deviceSelect">{{ dev|capitalize }}</label>
+    <select id="deviceSelect"><option value="" disabled selected>Loading {{ devs }}…</option></select>
     <span class="spacer"></span>
     <button class="status" id="statusBtn" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="statusPop">
         <span class="dot pending" id="statusDot"></span><span id="statusText">Connecting…</span>
     </button>
-    <button class="btn" id="btnSync" type="button" title="Ask the switch for its current settings and zones">Sync</button>
+    <button class="btn" id="btnSync" type="button" title="Ask the {{ dev }} for its current settings and zones">Sync</button>
     <button class="btn icon" id="menuBtn" type="button" aria-label="More" aria-haspopup="menu" aria-expanded="false" aria-controls="moreMenu">
         <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><circle cx="8" cy="3" r="1.5"/><circle cx="8" cy="8" r="1.5"/><circle cx="8" cy="13" r="1.5"/></svg>
     </button>
@@ -47,17 +50,17 @@
         <dl>
             <dt>Addon</dt><dd><span class="dot" id="popServerDot"></span><span id="popServer">Connecting</span></dd>
             <dt id="popBackendLabel">MQTT broker</dt><dd><span class="dot" id="popBackendDot"></span><span id="popBackend">Unknown</span></dd>
-            <dt>Zigbee</dt><dd id="popStack">Unknown</dd>
+            <dt>{{ 'Through' if esphome else 'Zigbee' }}</dt><dd id="popStack">Unknown</dd>
             <dt>Last update</dt><dd class="num" id="popPacket">None yet</dd>
-            <dt>Switch firmware</dt><dd class="num" id="popFirmware">–</dd>
+            <dt>{{ dev|capitalize }} firmware</dt><dd class="num" id="popFirmware">–</dd>
             <dt>Version</dt><dd>{{ version }}</dd>
         </dl>
     </div>
 
     <div class="popover menu" id="moreMenu" role="menu" hidden>
         <button type="button" role="menuitem" id="menuSaveImage">Save map image</button>
-        <button type="button" role="menuitem" id="menuDiagnostics">Download diagnostics<span class="menu-note">For bug reports. Includes switch names and recent positions.</span></button>
-        <button type="button" role="menuitem" id="menuZwave">Z-Wave packet capture</button>
+        <button type="button" role="menuitem" id="menuDiagnostics">Download diagnostics<span class="menu-note">For bug reports. Includes {{ dev }} names and recent positions.</span></button>
+        <button type="button" role="menuitem" id="menuZwave" class="zigbee-only">Z-Wave packet capture</button>
         <div class="meta">mmWave Visualizer {{ version }}</div>
     </div>
 
@@ -92,23 +95,45 @@
         <div class="readout">
             <span class="occ" id="occupancy" data-state="unknown"><span class="dot"></span><span id="occupancyText">Waiting for data</span></span>
             <span class="chips" id="areaChips">
+                {% if esphome -%}
+                <span class="chip">Zone 1</span><span class="chip">Zone 2</span><span class="chip">Zone 3</span>
+                {%- else -%}
                 <span class="chip">Area 1</span><span class="chip">Area 2</span><span class="chip">Area 3</span><span class="chip">Area 4</span>
+                {%- endif %}
             </span>
+            {% if esphome -%}
+            <span class="chips" id="radarChips">
+                <span class="chip which-radar unknown" id="chipLd2450">LD2450</span><span class="chip which-radar unknown" id="chipLd2412">LD2412</span>
+            </span>
+            {%- endif %}
             <span>Light <strong class="num" id="illuminance">–</strong></span>
             <span>Targets <strong class="num" id="targetCount">0</strong><button class="info-btn" type="button" aria-label="About the targets" aria-expanded="false" aria-controls="targetsInfo" data-info="targetsInfo"></button></span>
         </div>
         <div class="info-panel" id="targetsInfo" hidden>
+            {% if esphome -%}
+            <p>The LD2450 follows up to three people. The sensor's firmware passes each position to Home Assistant about once a second, so the dots move in steps rather than smoothly.</p>
+            <p>The LD2412 next to it can't tell where someone is, only that they're there and how far away. It shows as the LD2412 chip and, once you enable its distance sensors in Home Assistant, as arcs on the map.</p>
+            <p>Occupied means either radar sees someone. The zone chips light up while the LD2450 counts someone inside that zone.</p>
+            {%- else -%}
             <p>When everyone leaves, the switch often stops sending positions without clearing the last one, so a target can stay frozen on the map and in the table. That's normal: it's the last reading, not someone still there.</p>
             <p>Go by the Occupied/Clear status and the area chips. If they say clear, ignore a leftover target. It goes away with the next report once someone walks in.</p>
+            {%- endif %}
         </div>
 
         <div class="map" id="map">
-            <svg class="radar" id="radar" role="img" aria-label="Radar map of the selected switch"></svg>
+            <svg class="radar" id="radar" role="img" aria-label="Radar map of the selected {{ dev }}"></svg>
             <div class="map-overlay coords" id="coords" aria-hidden="true"></div>
             <div class="map-overlay legend" aria-hidden="true">
+                {% if esphome -%}
+                <span class="legend-zone"><i class="swatch det"></i>Zone</span>
+                <span class="legend-filter"><i class="swatch intf"></i>Filter zone</span>
+                <span class="legend-ranges"><i class="swatch-line moving"></i>LD2412 moving</span>
+                <span class="legend-ranges"><i class="swatch-line still"></i>LD2412 still</span>
+                {%- else -%}
                 <span><i class="swatch det"></i>Detection</span>
                 <span><i class="swatch intf"></i>Interference</span>
                 <span><i class="swatch stay"></i>Stay</span>
+                {%- endif %}
             </div>
             <div class="map-overlay map-tools">
                 <span class="zoom-btns">
@@ -124,7 +149,7 @@
                 <button class="btn small primary" type="button" id="editBarSave">Save</button>
             </div>
             <div class="map-bar" id="arrangeBar" hidden>
-                <span class="grow">Drag the switch to where it is in the room and turn it with the round handle. Drag the corners to fit your walls.</span>
+                <span class="grow">Drag the {{ dev }} to where it is in the room and turn it with the round handle. Drag the corners to fit your walls.</span>
                 <button class="btn small primary" type="button" id="arrangeDone">Done</button>
             </div>
             <div class="map-bar replay-bar" id="replayBar" hidden>
@@ -144,7 +169,7 @@
 
         <div class="targets">
             <table>
-                <thead><tr><th>Target</th><th>Width</th><th>Depth</th><th>Height</th><th>Movement</th></tr></thead>
+                <thead><tr><th>Target</th><th>{{ 'Across (X)' if esphome else 'Width' }}</th><th>{{ 'Out (Y)' if esphome else 'Depth' }}</th><th>{{ 'Distance' if esphome else 'Height' }}</th><th>Movement</th></tr></thead>
                 <tbody id="targetRows"><tr><td colspan="5" class="empty">No targets yet</td></tr></tbody>
             </table>
         </div>
@@ -153,7 +178,7 @@
     <aside class="panel">
         <div class="tabs" role="tablist" aria-label="Settings">
             <button class="tab" type="button" role="tab" id="tab-zones" aria-controls="panel-zones" aria-selected="true">Zones</button>
-            <button class="tab" type="button" role="tab" id="tab-detection" aria-controls="panel-detection" aria-selected="false">Detection</button>
+            <button class="tab" type="button" role="tab" id="tab-detection" aria-controls="panel-detection" aria-selected="false">{{ 'Radars' if esphome else 'Detection' }}</button>
             <button class="tab" type="button" role="tab" id="tab-config" aria-controls="panel-config" aria-selected="false">Config</button>
             <button class="tab" type="button" role="tab" id="tab-history" aria-controls="panel-history" aria-selected="false">History</button>
             <button class="tab" type="button" role="tab" id="tab-display" aria-controls="panel-display" aria-selected="false">Display</button>
@@ -166,6 +191,25 @@
                 <button class="btn small" type="button" id="btnUndo" title="Undo (Ctrl+Z)">Undo</button>
             </div>
             <p class="needs-radar-note">Zones need the Visualizer's ZHA quirk: the quirk running this switch doesn't pass its zone reports on, so they can't be read or confirmed. <a href="https://github.com/nickduvall921/mmwave_vis/blob/main/ZHADOC.md#1-install-the-custom-quirk" target="_blank" rel="noopener">How to install</a></p>
+            {% if esphome -%}
+            <section class="section zone-mode">
+                <div class="field wide">
+                    <span class="label-info"><label for="zoneMode">Zone type</label><button class="info-btn" type="button" aria-label="About the zone type" aria-expanded="false" aria-controls="zoneModeInfo" data-info="zoneModeInfo"></button></span>
+                    <select id="zoneMode" disabled>
+                        <option value="" disabled selected>–</option>
+                        <option value="Disabled">Off: zones only count people</option>
+                        <option value="Detection">Detection: only track inside the zones</option>
+                        <option value="Filter">Filter: ignore everything inside the zones</option>
+                    </select>
+                </div>
+                <p class="hint" id="zoneModeHint"></p>
+                <div class="info-panel" id="zoneModeInfo" hidden>
+                    <p>The LD2450 has three zones and one zone type for all of them. The radar applies it itself, before anything reaches Home Assistant.</p>
+                    <p>Whatever the type, each zone has a target count sensor in Home Assistant that says how many people are inside it. With Filter the radar hides those people, so the counts stay at 0.</p>
+                    <p>It's sent to the sensor as soon as you choose it.</p>
+                </div>
+            </section>
+            {%- endif %}
             <div id="zoneGroups" data-needs-radar></div>
 
             <div class="editor" id="zoneEditor" data-needs-radar hidden>
@@ -173,11 +217,11 @@
                 <div class="range-row name-row"><span>Name</span><input type="text" id="editName" maxlength="40" autocomplete="off" spellcheck="false" aria-label="Zone name (optional)"><button class="info-btn" type="button" aria-label="About editing zones" aria-expanded="false" aria-controls="editorInfo" data-info="editorInfo"></button></div>
                 <div class="info-panel" id="editorInfo" hidden>
                     <p>Drag the zone or its handles on the map, or type exact values.</p>
-                    <p>The name is optional. It's only shown here and on the map; the switch doesn't store it.</p>
+                    <p>The name is optional. It's only shown here and on the map; the {{ dev }} doesn't store it.</p>
                 </div>
                 <div class="range-row"><span>Width</span><input type="number" step="1" id="editXMin" aria-label="Width from"><span class="to">to</span><input type="number" step="1" id="editXMax" aria-label="Width to"><span class="unit">cm</span></div>
                 <div class="range-row"><span>Depth</span><input type="number" step="1" id="editYMin" aria-label="Depth from"><span class="to">to</span><input type="number" step="1" id="editYMax" aria-label="Depth to"><span class="unit">cm</span></div>
-                <div class="range-row"><span>Height</span><input type="number" step="1" id="editZMin" aria-label="Height from"><span class="to">to</span><input type="number" step="1" id="editZMax" aria-label="Height to"><span class="unit">cm</span></div>
+                <div class="range-row zigbee-only"><span>Height</span><input type="number" step="1" id="editZMin" aria-label="Height from"><span class="to">to</span><input type="number" step="1" id="editZMax" aria-label="Height to"><span class="unit">cm</span></div>
                 <div class="editor-actions">
                     <button class="btn small" type="button" id="btnUseRecording">Use recording</button>
                     <button class="btn small ghost danger-text" type="button" id="btnDeleteZone">Delete</button>
@@ -207,17 +251,22 @@
             <section class="section" data-needs-radar>
                 <div class="section-head"><span class="label-info"><h2>Zone tools</h2><button class="info-btn" type="button" aria-label="About the zone tools" aria-expanded="false" aria-controls="zoneToolsInfo" data-info="zoneToolsInfo"></button></span></div>
                 <div class="info-panel info-under-head" id="zoneToolsInfo" hidden>
+                    {% if esphome -%}
+                    <p>A backup holds this sensor's three zones and their names (not the zone type). Importing writes every zone, clearing any that are empty in the file.</p>
+                    <p>Saving, deleting and importing can be undone with the Undo bar at the top of this tab.</p>
+                    {%- else -%}
                     <p>Detect automatically asks the switch to find fans, vents and curtains and add interference areas around them.</p>
                     <p>A backup holds this switch's detection, interference and stay zones and their names. Importing writes every slot, clearing any that are empty in the file.</p>
                     <p>Clearing, resetting, detecting and importing can all be undone with the Undo bar at the top of this tab.</p>
                     <p class="zha-only">On ZHA, press Sync after saving or running a tool to see what the switch stored.</p>
+                    {%- endif %}
                 </div>
-                <div class="tool-row"><span>Interference</span><span class="actions"><button class="btn link" type="button" data-command="1">Detect automatically</button><button class="btn link" type="button" data-command="3">Clear</button></span></div>
-                <div class="tool-row"><span>Reset</span><span class="actions"><button class="btn link" type="button" data-command="4">Detection areas</button><button class="btn link" type="button" data-command="5">Stay areas</button></span></div>
+                <div class="tool-row zigbee-only"><span>Interference</span><span class="actions"><button class="btn link" type="button" data-command="1">Detect automatically</button><button class="btn link" type="button" data-command="3">Clear</button></span></div>
+                <div class="tool-row zigbee-only"><span>Reset</span><span class="actions"><button class="btn link" type="button" data-command="4">Detection areas</button><button class="btn link" type="button" data-command="5">Stay areas</button></span></div>
                 <div class="tool-row"><span>Backup</span><span class="actions"><button class="btn link" type="button" id="btnExportZones">Export</button><button class="btn link" type="button" id="btnImportZones">Import</button></span></div>
                 <input type="file" id="importZonesFile" accept=".json,application/json" hidden>
                 <p class="status-line" id="zoneBackupStatus"></p>
-                <div class="check-row">
+                <div class="check-row zigbee-only">
                     <label class="check"><input type="checkbox" id="toggleStayInvert"><span>Correct mirrored stay zones</span></label>
                     <button class="info-btn" type="button" aria-label="About correcting mirrored stay zones" aria-expanded="false" aria-controls="stayInvertInfo" data-info="stayInvertInfo"></button>
                 </div>
@@ -235,7 +284,7 @@
                 <button class="btn small apply-btn" type="button" id="detApply" disabled>Apply</button>
             </div>
             <p class="needs-radar-note">Target reporting and the tests need the Visualizer's ZHA quirk. The settings below still work. <a href="https://github.com/nickduvall921/mmwave_vis/blob/main/ZHADOC.md#1-install-the-custom-quirk" target="_blank" rel="noopener">How to install</a></p>
-            <section class="section" data-needs-radar>
+            <section class="section zigbee-only" data-needs-radar>
                 <div class="toggle-row">
                     <label class="toggle-title" for="mmWaveTargetInfoReport">Target reporting</label>
                     <button class="info-btn" type="button" aria-label="About target reporting" aria-expanded="false" aria-controls="targetReportInfo" data-info="targetReportInfo">
@@ -251,7 +300,7 @@
                     <p class="zha-only">If nobody shows up with it on, open the switch in ZHA and choose Reconfigure.</p>
                 </div>
             </section>
-            <section class="section">
+            <section class="section zigbee-only">
                 <div class="section-head"><h2>Sensitivity and timing</h2></div>
                 <div class="field">
                     <span class="label-info"><label for="mmWaveDetectSensitivity">Sensitivity</label><button class="info-btn" type="button" aria-label="About sensitivity" aria-expanded="false" aria-controls="sensitivityInfo" data-info="sensitivityInfo"></button></span>
@@ -305,7 +354,7 @@
                     <div class="button-row" id="testerActions"></div>
                 </div>
             </section>
-            <section class="section">
+            <section class="section zigbee-only">
                 <div class="section-head"><span class="label-info"><h2>Room and light</h2><button class="info-btn" type="button" aria-label="About these settings" aria-expanded="false" aria-controls="systemInfo" data-info="systemInfo"></button></span></div>
                 <div class="info-panel info-under-head" id="systemInfo" hidden>
                     <p>Changes wait, marked with an orange dot, until you press Apply. Every other setting, from dimming speeds to the LED bar, is in the Config tab.</p>
@@ -333,26 +382,93 @@
                     </select>
                 </label>
             </section>
+
+            {% if esphome -%}
+            <section class="section">
+                <div class="section-head"><span class="label-info"><h2>The two radars now</h2><button class="info-btn" type="button" aria-label="About the two radars" aria-expanded="false" aria-controls="radarsInfo" data-info="radarsInfo"></button></span></div>
+                <div class="info-panel info-under-head" id="radarsInfo" hidden>
+                    <p>The LD2450 tracks where up to three people are and is what draws the map and the zones. The LD2412 only measures distance, but it reacts fast and holds on to someone sitting still.</p>
+                    <p>Each has its own presence sensor in Home Assistant. Many people use the LD2450's zones to know where someone is and the LD2412 to decide whether the room is empty.</p>
+                </div>
+                <dl class="facts">
+                    <dt>LD2450 (tracking)</dt><dd id="factLd2450">–</dd>
+                    <dt>LD2412 (presence)</dt><dd id="factLd2412">–</dd>
+                </dl>
+                <p class="hint" id="radarHint"></p>
+            </section>
+            <section class="section">
+                <div class="section-head"><span class="label-info"><h2>Presence timeouts</h2><button class="info-btn" type="button" aria-label="About the presence timeouts" aria-expanded="false" aria-controls="timeoutInfo" data-info="timeoutInfo"></button></span></div>
+                <div class="info-panel info-under-head" id="timeoutInfo" hidden>
+                    <p>How long each radar's presence sensor stays on after it stops seeing anyone. Short clears the room quickly; longer rides out the moments a radar loses someone who sits very still.</p>
+                    <p>Changes wait, marked with an orange dot, until you press Apply. Every other setting is in the Config tab.</p>
+                </div>
+                <div class="field">
+                    <label for="ld2450_timeout">LD2450 timeout (s)</label>
+                    <input type="number" id="ld2450_timeout" data-param="ld2450_timeout" min="0" max="3600" inputmode="numeric">
+                </div>
+                <div class="field">
+                    <label for="ld2412_timeout">LD2412 timeout (s)</label>
+                    <input type="number" id="ld2412_timeout" data-param="ld2412_timeout" min="0" max="900" inputmode="numeric">
+                </div>
+            </section>
+            <section class="section">
+                <div class="section-head"><span class="label-info"><h2>LD2412 gates</h2><button class="info-btn" type="button" aria-label="About the LD2412's gates" aria-expanded="false" aria-controls="gatesInfo" data-info="gatesInfo"></button></span></div>
+                <div class="info-panel info-under-head" id="gatesInfo" hidden>
+                    <p>The LD2412 splits its range into 14 gates, each a slice of distance. It reports motion or stillness in a gate when the energy it measures there passes that gate's threshold.</p>
+                    <p>To tune it: turn on engineering mode, leave the room and note which gates still show energy (a fan, a curtain); raise those thresholds above it in the Config tab. Then sit where you usually sit and check your gate passes its stillness threshold.</p>
+                    <p>Turn engineering mode off when you're done. It sends a lot of updates to Home Assistant.</p>
+                </div>
+                <div class="toggle-row">
+                    <label class="toggle-title" for="ld2412_engineering_mode">Engineering mode</label>
+                    <span class="grow"></span>
+                    <input type="checkbox" role="switch" class="switch" id="ld2412_engineering_mode" data-param="ld2412_engineering_mode" data-on="ON" data-off="OFF">
+                </div>
+                <div class="field">
+                    <label for="ld2412_min_distance_gate">Nearest gate in use</label>
+                    <input type="number" id="ld2412_min_distance_gate" data-param="ld2412_min_distance_gate" min="1" max="12" inputmode="numeric">
+                </div>
+                <div class="field">
+                    <label for="ld2412_max_distance_gate">Farthest gate in use</label>
+                    <input type="number" id="ld2412_max_distance_gate" data-param="ld2412_max_distance_gate" min="2" max="13" inputmode="numeric">
+                </div>
+                <div class="gate-chart" id="gateChart"></div>
+                <p class="hint" id="gateNote"></p>
+            </section>
+            <section class="section">
+                <div class="section-head"><span class="label-info"><h2>Radar tools</h2><button class="info-btn" type="button" aria-label="About the radar tools" aria-expanded="false" aria-controls="radarToolsInfo" data-info="radarToolsInfo"></button></span></div>
+                <div class="info-panel info-under-head" id="radarToolsInfo" hidden>
+                    <p>Calibrate starts the LD2412's dynamic background correction: it measures the room as it is, so leave the room first and keep it still until it finishes.</p>
+                    <p>A factory reset puts that radar's own settings back: the LD2450 loses its zones, the LD2412 its gate thresholds.</p>
+                </div>
+                <div class="tool-row"><span>LD2412</span><span class="actions"><button class="btn link" type="button" data-button="ld2412_calibrate">Calibrate</button><button class="btn link" type="button" data-button="ld2412_restart">Restart</button><button class="btn link danger-text" type="button" data-button="ld2412_factory_reset">Factory reset</button></span></div>
+                <div class="tool-row"><span>LD2450</span><span class="actions"><button class="btn link" type="button" data-button="ld2450_restart">Restart</button><button class="btn link danger-text" type="button" data-button="ld2450_factory_reset">Factory reset</button></span></div>
+            </section>
+            {%- endif %}
         </div>
 
         <!-- Config: every setting on the switch, built by config.js from assets/settings.json -->
         <div class="tab-panel" role="tabpanel" id="panel-config" aria-labelledby="tab-config" hidden>
             <section class="section">
-                <div class="section-head"><h2>This switch</h2></div>
+                <div class="section-head"><h2>This {{ dev }}</h2></div>
                 <label class="field"><span>Name</span><input type="text" id="switchName" maxlength="60" autocomplete="off" spellcheck="false" disabled></label>
                 <p class="hint switch-name-hint" id="switchNameHint"></p>
                 <div id="switchInfo"></div>
             </section>
             <section class="section cfg-top">
                 <div class="cfg-tools">
-                    <input type="search" id="cfgSearch" placeholder="Search settings or p13" aria-label="Search settings" autocomplete="off" spellcheck="false">
+                    <input type="search" id="cfgSearch" placeholder="{{ 'Search settings' if esphome else 'Search settings or p13' }}" aria-label="Search settings" autocomplete="off" spellcheck="false">
                     <button class="btn small" type="button" id="cfgRead">Refresh Values</button>
                     <button class="btn small apply-btn" type="button" id="cfgApply" disabled>Apply</button>
                     <button class="info-btn" type="button" aria-label="About the Config tab" aria-expanded="false" aria-controls="configInfo" data-info="configInfo"></button>
                 </div>
                 <div class="info-panel" id="configInfo" hidden>
+                    {% if esphome -%}
+                    <p>The settings of the sensor's two radars, each with an ⓘ. Changes wait until you press Apply, then show Saved once the sensor confirms. Risky ones ask first.</p>
+                    <p>Each one is an entity on the device's page in Home Assistant. One that's disabled there is greyed out here.</p>
+                    {%- else -%}
                     <p>Every setting on the switch, each with an ⓘ. Changes wait until you press Apply, then show Saved once the switch confirms. Risky ones ask first.</p>
                     <p>Search by name, or type p and a parameter number (p13) to jump to that parameter.</p>
+                    {%- endif %}
                     <p>Blue dot indicates value not at default. Orange dot indicates a change not applied yet.</p>
                     <p class="zha-only">On ZHA, settings are read from the switch when you open a group, one at a time over Zigbee, so a large group takes a few seconds. "Refresh Values" pulls all values from the switch again.</p>
                     <p class="z2m-only">Values from Zigbee2MQTT. "Refresh Values" pulls all values from the switch again.</p>
@@ -378,9 +494,14 @@
                     <input type="checkbox" role="switch" class="switch" id="historyEnabled">
                 </div>
                 <div class="info-panel" id="historyInfo" hidden>
+                    {% if esphome -%}
+                    <p>Records where people were and when each sensor's occupancy and zones changed, for every sensor, so you can see a heat map and a timeline here.</p>
+                    <p>It's kept in the addon's data folder on this Home Assistant and never sent anywhere.</p>
+                    {%- else -%}
                     <p>Records where people were and when each switch's occupancy and light changed, for every switch, so you can see a heat map and a timeline here.</p>
                     <p>It's kept in the addon's data folder on this Home Assistant and never sent anywhere.</p>
                     <p>Positions are only recorded while a switch has target reporting on. On a larger Zigbee network, leaving it on can slow other devices down; see Target reporting in the Detection tab.</p>
+                    {%- endif %}
                 </div>
                 <div class="tool-row" id="historyKeepRow" hidden>
                     <span>Keep for</span>
@@ -422,11 +543,16 @@
                     </span>
                 </div>
                 <div class="info-panel info-under-head" id="timelineInfo" hidden>
+                    {% if esphome -%}
+                    <p>When the occupancy and each zone changed. Choose a moment to replay what the radar saw from 30 seconds before to 30 seconds after.</p>
+                    <p>Turned on shows only when the room became occupied; All shows every change.</p>
+                    {%- else -%}
                     <p>When the occupancy, each detection area and the light changed. Choose a moment to replay what the radar saw from 30 seconds before to 30 seconds after.</p>
                     <p>Turned on shows only when the room became occupied or the light came on; All shows every change.</p>
+                    {%- endif %}
                 </div>
                 <div class="event-list" id="eventList"></div>
-                <div class="button-row"><button class="btn small ghost danger-text" type="button" id="btnClearHistory">Clear this switch's history</button></div>
+                <div class="button-row"><button class="btn small ghost danger-text" type="button" id="btnClearHistory">Clear this {{ dev }}'s history</button></div>
             </section>
         </div>
 
@@ -436,16 +562,17 @@
                 <div class="section-head"><h2>Show on the map</h2></div>
                 <label class="check"><input type="checkbox" id="vizToggleGrid"><span>Field of view and range rings</span></label>
                 <label class="check"><input type="checkbox" id="vizToggleLabels"><span>Zone names</span></label>
-                <label class="check"><input type="checkbox" id="vizToggleZValues"><span>Zone heights</span></label>
-                <label class="check"><input type="checkbox" id="vizToggleDetection"><span>Detection areas</span></label>
+                <label class="check zigbee-only"><input type="checkbox" id="vizToggleZValues"><span>Zone heights</span></label>
+                <label class="check"><input type="checkbox" id="vizToggleDetection"><span>{{ 'Zones' if esphome else 'Detection areas' }}</span></label>
                 <div class="check-group">
                     <label class="chip-check"><input type="checkbox" id="vizToggleDetection1"><span>1</span></label>
                     <label class="chip-check"><input type="checkbox" id="vizToggleDetection2"><span>2</span></label>
                     <label class="chip-check"><input type="checkbox" id="vizToggleDetection3"><span>3</span></label>
-                    <label class="chip-check"><input type="checkbox" id="vizToggleDetection4"><span>4</span></label>
+                    <label class="chip-check zigbee-only"><input type="checkbox" id="vizToggleDetection4"><span>4</span></label>
                 </div>
-                <label class="check"><input type="checkbox" id="vizToggleInterference"><span>Interference areas</span></label>
-                <label class="check"><input type="checkbox" id="vizToggleStay"><span>Stay areas</span></label>
+                <label class="check zigbee-only"><input type="checkbox" id="vizToggleInterference"><span>Interference areas</span></label>
+                <label class="check zigbee-only"><input type="checkbox" id="vizToggleStay"><span>Stay areas</span></label>
+                <label class="check esphome-only"><input type="checkbox" id="vizToggleRanges"><span>LD2412 distance arcs</span></label>
                 <label class="check"><input type="checkbox" id="vizToggleHeat"><span>Heat map</span></label>
                 <label class="check"><input type="checkbox" id="vizToggleZoom"><span>Zoom buttons</span></label>
             </section>
@@ -471,11 +598,11 @@
             <section class="section">
                 <div class="section-head"><span class="label-info"><h2>Room layout</h2><button class="info-btn" type="button" aria-label="About the room layout" aria-expanded="false" aria-controls="layoutInfo" data-info="layoutInfo"></button></span><button class="btn small" type="button" id="btnArrange">Arrange on map</button></div>
                 <div class="info-panel info-under-head" id="layoutInfo" hidden>
-                    <p>Place the switch in your room so the map matches the space. This only changes the picture, never the switch, and is saved for everyone who opens the addon.</p>
+                    <p>Place the {{ dev }} in your room so the map matches the space. This only changes the picture, never the {{ dev }}, and is saved for everyone who opens the addon.</p>
                 </div>
                 <div class="grid-3" style="margin-top:10px">
-                    <label class="mini">Switch X<input type="number" id="layoutX" step="1"></label>
-                    <label class="mini">Switch Y<input type="number" id="layoutY" step="1"></label>
+                    <label class="mini">{{ dev|capitalize }} X<input type="number" id="layoutX" step="1"></label>
+                    <label class="mini">{{ dev|capitalize }} Y<input type="number" id="layoutY" step="1"></label>
                     <label class="mini">Facing (°)<input type="number" id="layoutRot" step="1"></label>
                 </div>
                 <div class="button-row">
@@ -487,6 +614,14 @@
                 <div class="grid-2" id="roomFields" style="margin-top:10px" hidden>
                     <label class="mini">Room width<input type="number" id="roomW" min="20" step="1"></label>
                     <label class="mini">Room depth<input type="number" id="roomD" min="20" step="1"></label>
+                </div>
+                <div class="check-row esphome-only">
+                    <label class="check"><input type="checkbox" id="layoutMirror"><span>Mirror left and right</span></label>
+                    <button class="info-btn" type="button" aria-label="About mirroring the map" aria-expanded="false" aria-controls="mirrorInfo" data-info="mirrorInfo"></button>
+                </div>
+                <div class="info-panel" id="mirrorInfo" hidden>
+                    <p>Stand in front of the sensor and step to one side. If your dot moves the other way on the map, turn this on. Which way the radar counts depends on how the sensor is mounted.</p>
+                    <p>Like the rest of the layout it only changes the picture: zones stay where they are in the room.</p>
                 </div>
             </section>
         </div>

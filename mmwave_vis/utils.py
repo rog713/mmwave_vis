@@ -77,6 +77,8 @@ def normalize_layout(layout):
     A layout places the switch in its room for display only: `x`/`y` are where
     the switch sits (cm), `rot` the way it faces (degrees, counter-clockwise),
     and `room` is an optional wall outline `{x_min, x_max, y_min, y_max}`.
+    `mirror: true` (only kept when set) draws the sensor's left and right swapped,
+    for a sensor mounted the other way up.
     Returns (layout, None) or (None, error message). Unknown keys are dropped.
     """
     if not isinstance(layout, dict):
@@ -96,6 +98,8 @@ def normalize_layout(layout):
             if r['x_min'] >= r['x_max'] or r['y_min'] >= r['y_max']:
                 raise ValueError("room min values must be below max values")
             clean['room'] = r
+        if layout.get('mirror') is True:
+            clean['mirror'] = True
     except ValueError as e:
         return None, str(e)
     if clean['rot'] == 360:   # 359.96 rounds up
@@ -103,7 +107,8 @@ def normalize_layout(layout):
     return clean, None
 
 
-ZONE_NAME_CATEGORIES = ('mmwave_detection_areas', 'mmwave_interference_areas', 'mmwave_stay_areas')
+ZONE_NAME_CATEGORIES = ('mmwave_detection_areas', 'mmwave_interference_areas', 'mmwave_stay_areas',
+                        'ld2450_zones')   # an ESPHome sensor's LD2450 zones (esphome_entities.ZONE_CATEGORY)
 MAX_ZONE_NAME = 40
 _CONTROL_CHARS = re.compile(r'[\x00-\x1f\x7f]')
 

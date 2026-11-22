@@ -3,7 +3,7 @@
 // lives in the sensor's own frame; the room layout places the sensor in the
 // room ("world") frame, and the view maps the world onto the screen.
 
-import { ZONE_TYPES, AREAS } from './state.js';
+import { ZONE_TYPES, AREAS, HAS_HEIGHT, DEV } from './state.js';
 import { num } from './ui.js';
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
@@ -18,7 +18,7 @@ const PAD = 16;                    // px kept clear around the requested range
 const MIN_SPAN = 60;               // cm, closest zoom
 const MAX_SPAN = 8000;             // cm, furthest zoom
 const REC_CHUNK = 500;             // recorded points per <path>
-const LAYERS = ['grid', 'room', 'heat', 'zones', 'recording', 'trails', 'targets', 'edit', 'sensor'];
+const LAYERS = ['grid', 'room', 'heat', 'ranges', 'zones', 'recording', 'trails', 'targets', 'edit', 'sensor'];
 const HEAT_PAD = 2;                // empty cells around the heat map so its blur fades out
 const MAX_LABEL = 18;              // characters of a zone name shown on the map
 
@@ -99,12 +99,13 @@ export class Radar {
         this.W = 0;
         this.H = 0;
         this.range = { ...DEFAULT_RANGE };
-        this.layout = { x: 0, y: 0, rot: 0, room: null };
+        this.layout = { x: 0, y: 0, rot: 0, room: null, mirror: false };
         this.zones = null;
         this.pending = new Set();
-        this.vis = { grid: true, labels: true, heights: false, detection: true, det: [true, true, true, true], stay: true, interference: true };
+        this.vis = { grid: true, labels: true, heights: false, detection: true, det: [true, true, true, true], stay: true, interference: true, ranges: true };
         this.occupied = [false, false, false, false];
         this.targets = [];
+        this.ranges = [];
         this.history = {};
         this.rec = { slots: [], pad: 0 };
         this.recNodes = [];
@@ -162,13 +163,13 @@ export class Radar {
     setLayout(layout) {
         if (this.drag && ['sensor', 'rotate'].includes(this.drag.kind)) return;
         if (this.drag && this.drag.owner === 'room') return;
-        this.layout = { x: layout.x || 0, y: layout.y || 0, rot: layout.rot || 0, room: layout.room ? { ...layout.room } : null };
+        this.layout = { x: layout.x || 0, y: layout.y || 0, rot: layout.rot || 0, room: layout.room ? { ...layout.room } : null, mirror: !!layout.mirror };
         this.invalidate('all');
     }
 
     // `pending` holds "category:area" keys the switch hasn't confirmed yet; they're drawn dashed
     setZones(zones, pending) { this.zones = zones; this.pending = pending || new Set(); this.invalidate('zones'); }
-    setVisibility(vis) { this.vis = { ...this.vis, ...vis, det: vis.det ? [...vis.det] : this.vis.det }; this.invalidate('grid', 'zones', 'edit'); }
+    setVisibility(vis) { this.vis = { ...this.vis, ...vis, det: vis.det ? [...vis.det] : this.vis.det }; this.invalidate('grid', 'ranges', 'zones', 'edit'); }
 
     setOccupied(list) {
         if (list.every((v, i) => v === this.occupied[i])) return;
@@ -181,6 +182,10 @@ export class Radar {
         this.history = history;
         this.invalidate('targets', 'trails');
     }
+
+    // Distances measured without a direction (an LD2412 beside the tracking radar), drawn as
+    // arcs across the field of view: [{ r (cm), cls, label }]
+    setRanges(ranges) { this.ranges = ranges || []; this.invalidate('ranges'); }
 
     // Zone names ("category:area" → name), shown instead of "Area 2"
     setNames(names) { this.names = names || {}; this.invalidate('zones', 'edit'); }
@@ -306,14 +311,17 @@ export class Radar {
         const t = (this.layout.rot || 0) * DEG;
         this.cs = Math.cos(t);
         this.sn = Math.sin(t);
+        // A mirrored layout draws the sensor's x axis the other way round (a sensor mounted
+        // the other way up); everything else follows from these two transforms
+        this.mx = this.layout.mirror ? -1 : 1;
     }
 
     w2p(wx, wy) { return [this.W / 2 + (wx - this.cx) * this.k, this.H / 2 - (wy - this.cy) * this.k]; }
     p2w(px, py) { return [this.cx + (px - this.W / 2) / this.k, this.cy - (py - this.H / 2) / this.k]; }
-    s2w(x, y) { return [x * this.cs - y * this.sn + this.layout.x, x * this.sn + y * this.cs + this.layout.y]; }
+    s2w(x, y) { x *= this.mx; return [x * this.cs - y * this.sn + this.layout.x, x * this.sn + y * this.cs + this.layout.y]; }
     w2s(wx, wy) {
         const dx = wx - this.layout.x, dy = wy - this.layout.y;
-        return [dx * this.cs + dy * this.sn, -dx * this.sn + dy * this.cs];
+        return [(dx * this.cs + dy * this.sn) * this.mx, -dx * this.sn + dy * this.cs];
     }
     s2p(x, y) { const w = this.s2w(x, y); return this.w2p(w[0], w[1]); }
     p2s(px, py) { const w = this.p2w(px, py); return this.w2s(w[0], w[1]); }
@@ -338,6 +346,7 @@ export class Radar {
         if (d.has('room')) this._renderRoom();
         if (d.has('heatData')) this._renderHeat();
         if (d.has('heatData') || d.has('heat')) this._placeHeat();
+        if (d.has('ranges')) this._renderRanges();
         if (d.has('zones')) this._renderZones();
         if (d.has('recData')) this._renderRecording();
         else if (d.has('recAppend')) this._appendRecording();
@@ -396,8 +405,8 @@ export class Radar {
 
         if (!this.vis.grid) return;
         const o = this.s2p(0, 0);
-        const at = (r, deg) => this.s2p(r * Math.sin(deg * DEG), r * Math.cos(deg * DEG));
-        const arc = (r, a, b) => { const p = at(r, a), q = at(r, b), R = r1(r * k); return `M${r1(p[0])} ${r1(p[1])}A${R} ${R} 0 0 1 ${r1(q[0])} ${r1(q[1])}`; };
+        const at = (r, deg) => this._at(r, deg);
+        const arc = (r, a, b) => this._arc(r, a, b);
         const ext = `M${r1(o[0])} ${r1(o[1])}L${pts([at(FOV_RANGE, -FOV_EXTENDED)])}M${r1(o[0])} ${r1(o[1])}L${pts([at(FOV_RANGE, FOV_EXTENDED)])}` + arc(FOV_RANGE, -FOV_EXTENDED, FOV_EXTENDED);
         el('path', { class: 'fov-ext', d: ext }, g);
         const a = at(FOV_RANGE, -FOV_RATED);
@@ -408,8 +417,39 @@ export class Radar {
         if (100 * k >= 22) {
             for (let r = 100; r <= FOV_RANGE; r += 100) {
                 const p = at(r, FOV_RATED + 4);
-                el('text', { class: 'ring-label', x: r1(p[0]), y: r1(p[1]), 'dominant-baseline': 'middle' }, g).textContent = `${r / 100} m`;
+                // Mirrored, the labels' side of the cone is the other one: run them away from it
+                el('text', { class: 'ring-label', x: r1(p[0]), y: r1(p[1]), 'text-anchor': this.mx > 0 ? null : 'end', 'dominant-baseline': 'middle' }, g).textContent = `${r / 100} m`;
             }
+        }
+    }
+
+    // A point `r` cm from the sensor, `deg` degrees right of straight ahead, on screen
+    _at(r, deg) { return this.s2p(r * Math.sin(deg * DEG), r * Math.cos(deg * DEG)); }
+
+    // SVG path of the arc at `r` cm from angle a to b (a mirrored layout turns the other way)
+    _arc(r, a, b) {
+        const p = this._at(r, a), q = this._at(r, b), R = r1(r * this.k);
+        return `M${r1(p[0])} ${r1(p[1])}A${R} ${R} 0 0 ${this.mx > 0 ? 1 : 0} ${r1(q[0])} ${r1(q[1])}`;
+    }
+
+    _renderRanges() {
+        const g = this.layers.ranges;
+        g.replaceChildren();
+        if (!this.vis.ranges) return;
+        const o = this.s2p(0, 0);
+        const placed = [];
+        for (const { r, cls, label } of this.ranges) {
+            if (!(r > 0)) continue;
+            el('path', { class: `range-arc ${cls}`, d: this._arc(r, -FOV_RATED, FOV_RATED) }, g);
+            // The label sits at the end of its arc away from the ring labels, running away
+            // from the cone whichever way the sensor is turned; two close distances are
+            // moved apart so both can be read
+            const p = this._at(r, -(FOV_RATED + 3));
+            let y = p[1];
+            for (const other of placed) if (Math.abs(y - other) < 13) y = other + 13;
+            placed.push(y);
+            el('text', { class: `range-label ${cls}`, x: r1(p[0]), y: r1(y), 'text-anchor': p[0] < o[0] ? 'end' : 'start', 'dominant-baseline': 'middle' }, g)
+                .textContent = label;
         }
     }
 
@@ -482,7 +522,7 @@ export class Radar {
     _sensorMatrix() {
         const { k, cs, sn, W, H, cx, cy } = this;
         const { x, y } = this.layout;
-        const m = [k * cs, -k * sn, -k * sn, -k * cs, W / 2 + (x - cx) * k, H / 2 + (cy - y) * k];
+        const m = [k * cs * this.mx, -k * sn * this.mx, -k * sn, -k * cs, W / 2 + (x - cx) * k, H / 2 + (cy - y) * k];
         return `matrix(${m.map(v => +v.toFixed(5)).join(' ')})`;
     }
 
@@ -646,7 +686,7 @@ export class Radar {
             node.label.setAttribute('x', r1(p[0] + r + 5));
             node.label.setAttribute('y', r1(p[1] - r - 2));
             if (node.id.textContent !== key) node.id.textContent = key;
-            const z = ` z ${num(t.z)}`;
+            const z = HAS_HEIGHT ? ` z ${num(t.z)}` : '';
             if (node.z.textContent !== z) node.z.textContent = z;
         }
         for (const [key, node] of this.targetNodes) {
@@ -698,7 +738,7 @@ export class Radar {
         const body = el('g', { class: 'sensor', transform: `translate(${r1(px)} ${r1(py)}) rotate(${r1(-rot)})` }, g);
         el('rect', { class: 'sensor-body', x: -13, y: -5, width: 26, height: 10, rx: 3 }, body);
         el('path', { class: 'sensor-nose', d: 'M-5 -5L0 -10L5 -5' }, body);
-        el('text', { class: 'sensor-label', x: r1(px - fx * 20), y: r1(py - fy * 20), 'text-anchor': 'middle', 'dominant-baseline': 'middle' }, g).textContent = 'Switch';
+        el('text', { class: 'sensor-label', x: r1(px - fx * 20), y: r1(py - fy * 20), 'text-anchor': 'middle', 'dominant-baseline': 'middle' }, g).textContent = DEV === 'sensor' ? 'Sensor' : 'Switch';
         if (!this.arranging) return;
         const hx = px + fx * 58, hy = py + fy * 58;
         el('line', { class: 'rot-line', x1: r1(px), y1: r1(py), x2: r1(hx), y2: r1(hy) }, g);

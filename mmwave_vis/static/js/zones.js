@@ -1,6 +1,6 @@
 // Zones: reading them from switch reports, the zone list, and the editor.
 
-import { state, on, emit, ZONE_TYPES, AREAS, ZONE_KEYS, zoneName, slotName, customName } from './state.js';
+import { state, on, emit, ZONE_TYPES, AREAS, ZONE_KEYS, ZONE_LIMITS, AREA_CATEGORY, HAS_HEIGHT, ESPHOME, DEV, zoneName, slotName, customName } from './state.js';
 import { $, h, toast, setNotice, clearNotice, confirmAction, span, plural, copyText } from './ui.js';
 import { setName, setNames } from './names.js';
 
@@ -43,8 +43,19 @@ export function sorted(zone) {
     const pair = (a, b) => [parseInt(a, 10), parseInt(b, 10)].sort((p, q) => p - q);
     const [x0, x1] = pair(zone.x_min, zone.x_max);
     const [y0, y1] = pair(zone.y_min, zone.y_max);
+    if (!HAS_HEIGHT) return { x_min: x0, x_max: x1, y_min: y0, y_max: y1 };
     const [z0, z1] = pair(zone.z_min, zone.z_max);
     return { x_min: x0, x_max: x1, y_min: y0, y_max: y1, z_min: z0, z_max: z1 };
+}
+
+// A zone moved and shrunk to what the radar's zones can hold (ZONE_LIMITS), or null if it fits
+export function trimmed(zone) {
+    if (!ZONE_LIMITS) return null;
+    const out = { ...zone };
+    for (const [axis, [lo, hi]] of Object.entries(ZONE_LIMITS)) {
+        for (const edge of [`${axis}_min`, `${axis}_max`]) out[edge] = Math.min(hi, Math.max(lo, Number(out[edge])));
+    }
+    return ZONE_KEYS.every(k => out[k] === Number(zone[k])) ? null : out;
 }
 
 // --- Reading reports -------------------------------------------------------
@@ -119,7 +130,7 @@ export function applyZoneList(category, list) {
     if (!Array.isArray(list) || !list.length) return;
     state.zoneReportAt[category] = Date.now();
     let changed = false;
-    for (let i = 0; i < 4; i++) changed = store(category, AREAS[i], parseArea(list[i])) || changed;
+    for (let i = 0; i < AREAS.length; i++) changed = store(category, AREAS[i], parseArea(list[i])) || changed;
     afterReport([category], changed);
     if (category === 'mmwave_interference_areas') interferenceResult(list.filter(Boolean).length);
 }
@@ -172,9 +183,11 @@ export function applyConfig(c) {
 // close behind another (seen through Zigbee2MQTT), so a write that still hasn't
 // shown up after RESEND_MS is sent once more.
 
-const QUIET_MS = { zha: 2000, z2m: 6500 };   // ignore reports this soon after a write
-const STEADY_MS = { zha: 1000, z2m: 6000 };   // a stale value has lasted 3 s on Z2M
-const POLL_FIRST_MS = 6000;
+// An ESPHome sensor is quick: the addon writes a zone's four corners in a second or two
+// and Home Assistant reports each one back as it lands.
+const QUIET_MS = { zha: 2000, z2m: 6500, esphome: 1000 };   // ignore reports this soon after a write
+const STEADY_MS = { zha: 1000, z2m: 6000, esphome: 500 };   // a stale value has lasted 3 s on Z2M
+const POLL_FIRST_MS = ESPHOME ? 2500 : 6000;
 const POLL_EVERY_MS = 6000;
 const POLL_RECHECK_MS = 1500;                 // once a report matches, look again soon
 const RESEND_MS = 18000;
@@ -214,7 +227,7 @@ function confirmTick() {
     for (const [key, p] of Object.entries(state.pending)) {
         if (now - p.since < CONFIRM_TIMEOUT_MS) continue;
         delete state.pending[key];
-        toast(`The switch hasn't confirmed ${zoneName(p.category, p.area)} yet. Press Sync to check what it stored.`, 'error', 8000);
+        toast(`The ${DEV} hasn't confirmed ${zoneName(p.category, p.area)} yet. Press Sync to check what it stored.`, 'error', 8000);
         if (!state.edit) renderZoneList();
         emit('zones');
     }
@@ -318,6 +331,7 @@ export function clearPending() {
 // Device write format for one area. Shared by the editor and backup restore.
 export function zoneToDevicePayload(category, zone) {
     const s = sorted(zone);
+    if (!HAS_HEIGHT) return { width_min: s.x_min, width_max: s.x_max, depth_min: s.y_min, depth_max: s.y_max };
     // The firmware mirrors the width (X) axis of stay areas (#41). With the
     // correction on, pre-mirror X (negate and swap, keeping min < max) so a
     // single write stores what was drawn. Other zone types are unaffected.
@@ -331,7 +345,8 @@ export function zoneToDevicePayload(category, zone) {
 // --- Zone list ---------------------------------------------------------------
 
 function dims(z) {
-    return `W ${span(z.x_min, z.x_max)} · D ${span(z.y_min, z.y_max)} · H ${span(z.z_min, z.z_max)}`;
+    const flat = `W ${span(z.x_min, z.x_max)} · D ${span(z.y_min, z.y_max)}`;
+    return HAS_HEIGHT ? `${flat} · H ${span(z.z_min, z.z_max)}` : flat;
 }
 
 // The row's title: the user's name with the slot underneath it, or just the slot
@@ -373,15 +388,16 @@ async function copyAndSay(text, what) {
 // Under a detection area: the Home Assistant entity that follows it, or on ZHA the
 // YAML for a sensor that does (ZHA only sends area occupancy as an event)
 function entityLine(category, area) {
-    if (category !== 'mmwave_detection_areas') return null;
+    if (category !== AREA_CATEGORY) return null;
     const info = state.deviceInfo;
     if (!info || info.topic !== state.device) return null;
     const n = area.slice(4);
-    if (state.stack === 'z2m') {
+    // On an ESPHome sensor it's the zone's target count: above 0 while someone is in it
+    if (state.stack === 'z2m' || ESPHOME) {
         const id = info.entities && info.entities[area];
         if (!id) return null;
         return h('div', { class: 'zone-entity' },
-            h('code', { title: 'Home Assistant entity for this area' }, id),
+            h('code', { title: ESPHOME ? 'Home Assistant sensor counting the people in this zone' : 'Home Assistant entity for this area' }, id),
             h('button', { class: 'btn link', type: 'button', onclick: () => copyAndSay(id, id) }, 'Copy'));
     }
     if (state.stack === 'zha' && info.ieee) {
@@ -403,13 +419,13 @@ export function renderZoneList() {
         const filled = AREAS.filter(a => zones[type.category][a]);
         const section = h('section', { class: 'section' },
             h('div', { class: 'section-head' },
-                h('h2', null, type.title, h('span', { class: 'count' }, `${filled.length} of 4`)),
-                filled.length < 4 && !edit
-                    ? h('button', { class: 'btn link', type: 'button', onclick: () => startAdd(type.category) }, 'Add area')
+                h('h2', null, type.title, h('span', { class: 'count' }, `${filled.length} of ${AREAS.length}`)),
+                filled.length < AREAS.length && !edit
+                    ? h('button', { class: 'btn link', type: 'button', onclick: () => startAdd(type.category) }, `Add ${type.noun}`)
                     : null));
 
         const isNewHere = edit && edit.isNew && edit.category === type.category;
-        if (!filled.length && !isNewHere) section.append(h('div', { class: 'empty-line' }, `No ${type.group} areas`));
+        if (!filled.length && !isNewHere) section.append(h('div', { class: 'empty-line' }, type.none));
 
         for (const area of filled) {
             const active = edit && edit.category === type.category && edit.area === area;
@@ -480,7 +496,7 @@ function renderSlotPicker() {
 
 function needDevice() {
     if (state.device) return false;
-    toast('Choose a switch first.', 'error');
+    toast(`Choose a ${DEV} first.`, 'error');
     return true;
 }
 
@@ -505,7 +521,8 @@ export function startNewZone(category, draft) {
     if (needDevice()) return false;
     const area = AREAS.find(a => !displayZones()[category][a]);
     if (!area) {
-        toast(`All four ${ZONE_TYPES.find(t => t.category === category).group} areas are in use.`, 'error');
+        const type = ZONE_TYPES.find(t => t.category === category);
+        toast(ESPHOME ? `All ${AREAS.length} zones are in use.` : `All four ${type.group} areas are in use.`, 'error');
         return false;
     }
     startEdit(category, area, sorted(draft));
@@ -573,6 +590,15 @@ export function saveEdit() {
     const e = state.edit;
     if (!e || needDevice()) return;
     const d = e.draft;
+    const fit = trimmed(d);
+    if (fit) {
+        // The radar can't hold more; save what fits and show it
+        Object.assign(d, fit);
+        fillInputs();
+        emit('draft');
+        const { x, y } = ZONE_LIMITS;
+        toast(`A zone can reach ${span(x[0], x[1])} cm across and ${span(y[0], y[1])} cm out, so it was trimmed to fit.`, 'info', 6000);
+    }
     if (d.x_min === d.x_max || d.y_min === d.y_max) {
         toast('A zone needs some width and depth.', 'error');
         return;
@@ -613,7 +639,7 @@ async function deleteEdit() {
     const e = state.edit;
     if (!e || e.isNew || needDevice()) return;
     const name = zoneName(e.category, e.area);
-    const ok = await confirmAction(`Delete ${name} from the switch?`, { confirm: 'Delete', danger: true });
+    const ok = await confirmAction(`Delete ${name} from the ${DEV}?`, { confirm: 'Delete', danger: true });
     if (!ok || state.edit !== e) return;
     const key = `${e.category}:${e.area}`;
     const oldName = customName(e.category, e.area);

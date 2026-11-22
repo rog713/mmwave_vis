@@ -92,6 +92,15 @@ def test_room_must_be_object_or_null():
     assert 'room' in error
 
 
+def test_mirror_is_only_kept_when_set():
+    # A sensor mounted the other way up counts left and right the other way round
+    layout, error = normalize_layout({'x': 5, 'mirror': True})
+    assert error is None
+    assert layout == {'x': 5, 'y': 0, 'rot': 0, 'room': None, 'mirror': True}
+    for off in (False, None, 0, 1, 'true', 'yes'):
+        assert 'mirror' not in normalize_layout({'mirror': off})[0]
+
+
 # ===========================================================================
 # LayoutStore
 # ===========================================================================

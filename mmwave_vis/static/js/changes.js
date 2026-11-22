@@ -4,10 +4,12 @@
 // After Apply a change is "saving" until the switch reports the new value back, then
 // "saved"; if it doesn't in time, "unconfirmed".
 
-import { state, on, emit } from './state.js';
+import { state, on, emit, DEV } from './state.js';
 import { h, setText, plural, toast, confirmAction } from './ui.js';
 
-const CONFIRM_MS = { z2m: 10000, zha: 15000 };   // ZHA reads the values back after 1.5 s, one radio read at a time
+// ZHA reads the values back after 1.5 s, one radio read at a time. An ESPHome sensor's
+// setting is an entity whose new state comes straight back.
+const CONFIRM_MS = { z2m: 10000, zha: 15000, esphome: 8000 };
 
 let byKey = new Map();                // the settings catalogue, once the Config tab has loaded it
 export const queued = new Map();      // key → value (as Zigbee2MQTT names it) waiting for Apply
@@ -92,7 +94,7 @@ export function discard(keys = [...queued.keys()]) {
 export async function apply(keys = [...queued.keys()]) {
     keys = keys.filter(k => queued.has(k));
     if (!keys.length) return false;
-    if (!state.device) { toast('Choose a switch first.', 'error'); return false; }
+    if (!state.device) { toast(`Choose a ${DEV} first.`, 'error'); return false; }
     const risky = keys.map(k => byKey.get(k))
         .filter(s => s && s.risky && (!s.riskyTo || s.riskyTo.includes(String(queued.get(s.key)))));
     if (risky.length) {
@@ -124,7 +126,7 @@ function startPending(key, value) {
         clearTimeout(unconfirmedTimer);
         unconfirmedTimer = setTimeout(() => {
             const what = unconfirmed.length === 1 ? `"${titleOf(unconfirmed[0])}"` : `${unconfirmed.length} changes`;
-            toast(`The switch didn't confirm ${what}. Refresh Values in the Config tab shows what it has.`, 'error', 7000);
+            toast(`The ${DEV} didn't confirm ${what}. Refresh Values in the Config tab shows what it has.`, 'error', 7000);
             unconfirmed = [];
         }, 300);
     }, CONFIRM_MS[state.stack] || 12000);
@@ -188,8 +190,8 @@ export function bindApplyBar({ button, discardButton, status, scope = null }) {
         setText(button, n ? `Apply ${n}` : 'Apply');
         if (discardButton) discardButton.hidden = !n;
         if (status) {
-            setText(status, n ? `${plural(n, 'change')} not applied yet. Apply sends ${n === 1 ? 'it' : 'them'} to the switch.`
-                : saving ? `Sending ${plural(saving, 'change')} to the switch…` : saved ? 'Saved on the switch.' : '');
+            setText(status, n ? `${plural(n, 'change')} not applied yet. Apply sends ${n === 1 ? 'it' : 'them'} to the ${DEV}.`
+                : saving ? `Sending ${plural(saving, 'change')} to the ${DEV}…` : saved ? `Saved on the ${DEV}.` : '');
             status.dataset.tone = n ? 'queued' : !saving && saved ? 'good' : '';
         }
     };

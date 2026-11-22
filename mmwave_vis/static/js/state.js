@@ -1,14 +1,35 @@
 // State shared by the page's modules, plus a minimal event bus so the map,
 // zone list and editor can react to each other without importing each other.
 
-export const ZONE_TYPES = [
-    { category: 'mmwave_detection_areas',    group: 'detection',    title: 'Detection',    name: n => `Area ${n}`,         cls: 'det' },
-    { category: 'mmwave_interference_areas', group: 'interference', title: 'Interference', name: n => `Interference ${n}`, cls: 'intf' },
-    { category: 'mmwave_stay_areas',         group: 'stay',         title: 'Stay',         name: n => `Stay ${n}`,         cls: 'stay' },
+// Which kind of device the addon is set up for: 'z2m' or 'zha' (Inovelli switches), or
+// 'esphome' (Apollo R PRO-1: an LD2450 that tracks positions and an LD2412 beside it).
+// The addon puts it on <body>, and it can't change without a reload.
+export const STACK = (document.body.className.match(/stack-(\w+)/) || [])[1] || null;
+export const ESPHOME = STACK === 'esphome';
+// What messages call the device
+export const DEV = ESPHOME ? 'sensor' : 'switch';
+export const DEVS = ESPHOME ? 'sensors' : 'switches';
+
+// `noun`: what one zone of the type is called ("Add area", "No detection areas").
+// The LD2450 has one kind of zone, and its zone type applies to all three at once: with
+// Filter they're drawn like interference areas (ignored), otherwise like detection areas.
+export const ZONE_TYPES = ESPHOME ? [
+    { category: 'ld2450_zones', group: 'detection', title: 'Zones', name: n => `Zone ${n}`, noun: 'zone', none: 'No zones',
+        get cls() { return state.zoneMode === 'Filter' ? 'intf' : 'det'; } },
+] : [
+    { category: 'mmwave_detection_areas',    group: 'detection',    title: 'Detection',    name: n => `Area ${n}`,         cls: 'det',  noun: 'area', none: 'No detection areas' },
+    { category: 'mmwave_interference_areas', group: 'interference', title: 'Interference', name: n => `Interference ${n}`, cls: 'intf', noun: 'area', none: 'No interference areas' },
+    { category: 'mmwave_stay_areas',         group: 'stay',         title: 'Stay',         name: n => `Stay ${n}`,         cls: 'stay', noun: 'area', none: 'No stay areas' },
 ];
 export const ZONE_TYPE = Object.fromEntries(ZONE_TYPES.map(t => [t.category, t]));
-export const AREAS = ['area1', 'area2', 'area3', 'area4'];
-export const ZONE_KEYS = ['x_min', 'x_max', 'y_min', 'y_max', 'z_min', 'z_max'];
+// The zones that have an occupancy sensor each (the chips above the map)
+export const AREA_CATEGORY = ZONE_TYPES[0].category;
+export const AREAS = ESPHOME ? ['area1', 'area2', 'area3'] : ['area1', 'area2', 'area3', 'area4'];
+// The LD2450 sees a flat floor plan: its zones have no height
+export const HAS_HEIGHT = !ESPHOME;
+export const ZONE_KEYS = HAS_HEIGHT ? ['x_min', 'x_max', 'y_min', 'y_max', 'z_min', 'z_max'] : ['x_min', 'x_max', 'y_min', 'y_max'];
+// What a zone edge can be set to (cm), or null for no limit worth enforcing here
+export const ZONE_LIMITS = ESPHOME ? { x: [-486, 486], y: [0, 756] } : null;
 
 export function emptyZones() {
     return Object.fromEntries(ZONE_TYPES.map(t => [t.category, Object.fromEntries(AREAS.map(a => [a, null]))]));
@@ -39,7 +60,7 @@ export function zoneName(category, area) {
 
 export const state = {
     socket: null,
-    stack: null,              // 'z2m' | 'zha' | null
+    stack: null,              // 'z2m' | 'zha' | 'esphome' | null
     device: '',               // selected device topic
     deviceName: '',           // what the switch list calls it
     devices: [],              // the switch list from the addon (device_list)
@@ -59,8 +80,9 @@ export const state = {
     arranging: false,         // room layout mode
     replay: null,             // a recorded clip being played back instead of live data
     restoring: false,         // a backup restore or multi-zone undo is writing slots
-    layout: { x: 0, y: 0, rot: 0, room: null },
+    layout: { x: 0, y: 0, rot: 0, room: null, mirror: false },
     stayInvert: false,
+    zoneMode: null,           // ESPHome: the LD2450's zone type, 'Disabled' | 'Detection' | 'Filter'
     lastCommandId: null,      // 1 = auto-detect interference, 3 = clear interference
     lastCommandAt: 0,
 };

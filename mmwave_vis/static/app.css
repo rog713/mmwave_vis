@@ -662,6 +662,51 @@ body.no-radar .needs-radar-note {
 }
 body.no-radar [data-needs-radar] { opacity: 0.45; filter: grayscale(1); }
 
+/* --- ESPHome presence sensors (Apollo R PRO-1) -------------------------------- */
+
+/* What only an Inovelli switch has, and what only an ESPHome sensor has */
+body.stack-esphome .zigbee-only, body.stack-esphome .z2m-only { display: none !important; }
+body:not(.stack-esphome) .esphome-only { display: none !important; }
+
+/* Which of the two radars sees someone */
+.chip.which-radar { border-style: dashed; }
+.chip.which-radar.on { border-style: solid; border-color: color-mix(in srgb, var(--accent) 60%, transparent); color: var(--accent); background: var(--accent-soft); }
+.chip.which-radar.unknown { opacity: 0.6; }
+
+/* Zone type: one setting for all three zones */
+.zone-mode { padding-top: 6px; }
+.zone-mode .hint:empty { display: none; }
+.legend .legend-filter { display: none; }
+.map[data-zone-mode="Filter"] .legend .legend-zone { display: none; }
+.map[data-zone-mode="Filter"] .legend .legend-filter { display: inline-flex; }
+
+/* The LD2412's distances: arcs across the field of view */
+.radar .range-arc { fill: none; stroke-width: 2; stroke-linecap: round; }
+.radar .range-arc.moving { stroke: var(--accent); }
+.radar .range-arc.still { stroke: var(--stay); stroke-dasharray: 7 5; }
+.radar .range-label { font-size: 11px; paint-order: stroke; stroke: var(--surface); stroke-width: 3px; stroke-linejoin: round; }
+.radar .range-label.moving { fill: var(--accent); }
+.radar .range-label.still { fill: var(--stay); }
+.swatch-line { width: 16px; height: 0; border-top: 2px solid; flex: none; display: inline-block; }
+.swatch-line.moving { border-color: var(--accent); }
+.swatch-line.still { border-color: var(--stay); border-top-style: dashed; }
+
+/* The LD2412's gates: energy as a bar, the threshold as a line across it */
+.gate-chart { margin-top: 10px; display: grid; gap: 3px; }
+.gate-row { display: grid; grid-template-columns: 104px 1fr 1fr; align-items: center; gap: 8px; font-size: 12px; }
+.gate-head { color: var(--text-3); margin-bottom: 2px; }
+.gate-label { color: var(--text-2); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.gate-row.unused { opacity: 0.4; }
+.gate-bar { position: relative; height: 16px; border-radius: 3px; background: color-mix(in srgb, var(--text-3) 14%, transparent); overflow: hidden; }
+.gate-bar .fill { position: absolute; inset: 0 auto 0 0; background: color-mix(in srgb, var(--accent) 38%, transparent); transition: width 0.25s linear; }
+.gate-bar.still .fill { background: color-mix(in srgb, var(--stay) 38%, transparent); }
+.gate-bar.hot .fill { background: var(--accent); }
+.gate-bar.still.hot .fill { background: var(--stay); }
+.gate-bar .mark { position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px; background: var(--text); }
+.gate-bar b { position: absolute; right: 4px; top: 0; line-height: 16px; font-size: 10.5px; font-weight: 400; color: var(--text-2); }
+.gate-bar.hot b { color: var(--text); font-weight: 500; }
+@media (prefers-reduced-motion: reduce) { .gate-bar .fill { transition: none; } }
+
 /* --- Narrow screens --------------------------------------------------------- */
 
 @media (max-width: 900px) {
