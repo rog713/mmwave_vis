@@ -4,6 +4,7 @@ an Apollo R PRO-1 on it: discovery, live positions, and writing zones, settings
 and buttons through real WebSocket connections on localhost.
 """
 
+import json
 import os
 import sys
 import threading
@@ -129,6 +130,33 @@ def test_finds_the_r_pro_1_and_nothing_else(setup):
     assert page.wait("mqtt_status", lambda d: d["connected"] is True)
 
 
+def test_finds_it_with_the_unique_ids_older_versions_built():
+    page = Page()
+    ha = FakeHA(unique_ids="object_id")
+    # Renamed in Home Assistant, and listed without their original names
+    for e in ha.entities:
+        if e["device_id"] != "plug1":
+            renamed = e["entity_id"].replace("apollo_r_pro_1_a1b2c3_ld2450_target", "couch")
+            if e["entity_id"] in ha.states:
+                ha.states[renamed] = ha.states.pop(e["entity_id"])
+            e.update(entity_id=renamed, original_name=None)
+    with ha:
+        client = make_client(ha, page)
+        client.start()
+        try:
+            assert wait_until(lambda: client.connected and KEY in client.devices), client.error
+            assert client.devices[KEY]["roles"]["t1_x"] == "sensor.couch_1_x"
+            assert len(client._index) == 118
+            ha.set_state("sensor.couch_1_x", "-700.0")
+            ha.set_state("sensor.couch_1_y", "1900.0")
+            page_topic = f"topic:{TOPIC}"
+            assert wait_until(lambda: any(name == "new_data" and to == page_topic and data["payload"]["targets"] ==
+                                          [{"id": 1, "x": -70, "y": 190, "z": 0, "dop": 0}]
+                                          for name, data, to in page.events))
+        finally:
+            client.stop()
+
+
 def test_topic_and_storage_key(setup):
     _, client, _ = setup
     assert client.key_for_topic(TOPIC) == KEY
@@ -213,9 +241,17 @@ def test_positions_on_a_us_customary_install():
         client.start()
         try:
             assert wait_until(lambda: client.connected and len(client._states) >= len(client._index))
-            ha.set_target(1, 1000, 2000)
-            frame = page.wait("new_data", lambda d: d["payload"]["targets"] and d["payload"]["targets"][0]["y"] == 200)
+            ha.set_target(1, 1000, 2000, speed_mm_s=-500)
+            frame = page.wait("new_data", lambda d: d["payload"]["targets"] and d["payload"]["targets"][0]["y"] == 200
+                              and d["payload"]["targets"][0]["dop"] == -50)
             assert frame["payload"]["targets"][0]["x"] == 100
+            # Home Assistant doesn't convert numbers, so the zone corners are still millimetres
+            ids = zone_ids(1)
+            assert ha.states[ids["x1"]]["a"]["unit_of_measurement"] == "mm"
+            client.write_zones(SID, KEY, {1: {"x1": -100, "y1": 50, "x2": 100, "y2": 250}})
+            assert wait_until(lambda: ha.radar_zones[1] == [-1000, 500, 1000, 2500])
+            assert [c[3] for c in ha.calls] == [{"value": -1000}, {"value": 500}, {"value": 1000}, {"value": 2500}]
+            assert not page.all("command_error")
         finally:
             client.stop()
 
@@ -228,8 +264,9 @@ def test_zone_write_sets_the_four_corners(setup):
     ha, client, page = setup
     ids = zone_ids(1)
     client.write_zones(SID, KEY, {1: {"x1": -200, "y1": 80, "x2": -20, "y2": 220}})
-    want = {"x1": "-2000", "y1": "800", "x2": "-200", "y2": "2200"}
+    want = {"x1": "-2000.0", "y1": "800.0", "x2": "-200.0", "y2": "2200.0"}
     assert wait_until(lambda: all(ha.states[ids[c]]["s"] == want[c] for c in want))
+    assert wait_until(lambda: ha.radar_zones[1] == [-2000, 800, -200, 2200])
     zones = page.wait("device_config", lambda d: (d["payload"].get(ee.ZONE_CATEGORY) or {}).get("area1") ==
                       {"x_min": -200, "x_max": -20, "y_min": 80, "y_max": 220})
     assert zones["topic"] == TOPIC
@@ -241,11 +278,11 @@ def test_zone_write_only_sends_the_corners_that_change(setup):
     ha, client, page = setup
     ids = zone_ids(2)
     client.write_zones(SID, KEY, {2: {"x1": 100, "y1": 100, "x2": 300, "y2": 300}})
-    assert wait_until(lambda: ha.states[ids["y2"]]["s"] == "3000")
+    assert wait_until(lambda: ha.states[ids["y2"]]["s"] == "3000.0")
     assert wait_until(lambda: len(ha.calls) == 4)
     del ha.calls[:]
     client.write_zones(SID, KEY, {2: {"x1": 100, "y1": 100, "x2": 350, "y2": 300}})
-    assert wait_until(lambda: ha.states[ids["x2"]]["s"] == "3500")
+    assert wait_until(lambda: ha.states[ids["x2"]]["s"] == "3500.0")
     page.wait("device_config", lambda d: (d["payload"].get(ee.ZONE_CATEGORY) or {}).get("area2", {}).get("x_max") == 350)
     assert [(c[2], c[3]) for c in ha.calls] == [(ids["x2"], {"value": 3500})]
 
@@ -254,27 +291,79 @@ def test_clearing_a_zone_writes_zeros(setup):
     ha, client, _ = setup
     ids = zone_ids(3)
     client.write_zones(SID, KEY, {3: {"x1": -50, "y1": 10, "x2": 50, "y2": 90}})
-    assert wait_until(lambda: ha.states[ids["y2"]]["s"] == "900")
+    assert wait_until(lambda: ha.states[ids["y2"]]["s"] == "900.0")
     client.write_zones(SID, KEY, {3: {"x1": 0, "y1": 0, "x2": 0, "y2": 0}})
-    assert wait_until(lambda: all(ha.states[e]["s"] == "0" for e in ids.values()))
+    assert wait_until(lambda: all(ha.states[e]["s"] == "0.0" for e in ids.values()))
+    assert ha.radar_zones[3] == [0, 0, 0, 0]
 
 
-def test_zone_write_in_inches():
+@pytest.mark.parametrize("zone, radar_mm", [
+    ({"x1": -254, "y1": 0, "x2": 0, "y2": 127}, [-2540, 0, 0, 1270]),         # whole inches
+    ({"x1": -123, "y1": 7, "x2": 50, "y2": 333}, [-1229, 69, 499, 3329]),     # nothing round about these
+    ({"x1": -486, "y1": 0, "x2": 486, "y2": 756}, [-4859, 0, 4859, 7559]),    # the LD2450's limits
+])
+def test_zone_write_when_the_corners_were_switched_to_inches(zone, radar_mm):
+    """Somebody chose inches for the zone numbers in Home Assistant. It converts what's
+    written back to millimetres (the sensor drops the fraction, and ignores a value past
+    its range) and shows the result rounded to a tenth of an inch."""
     page = Page()
-    with FakeHA(length_unit="in") as ha:
+    with FakeHA(length_unit="in", zone_unit="in") as ha:
         client = make_client(ha, page)
         client.start()
         try:
             assert wait_until(lambda: client.connected and len(client._states) >= len(client._index))
-            client.write_zones(SID, KEY, {1: {"x1": -254, "y1": 0, "x2": 0, "y2": 127}})
+            client.write_zones(SID, KEY, {1: zone})
             page.wait("device_config", lambda d: (d["payload"].get(ee.ZONE_CATEGORY) or {}).get("area1") ==
-                      {"x_min": -254, "x_max": 0, "y_min": 0, "y_max": 127})
-            ids = zone_ids(1)
-            assert float(ha.states[ids["x1"]]["s"]) == pytest.approx(-100)
-            assert float(ha.states[ids["y2"]]["s"]) == pytest.approx(50)
+                      {"x_min": zone["x1"], "x_max": zone["x2"], "y_min": zone["y1"], "y_max": zone["y2"]})
+            assert wait_until(lambda: ha.radar_zones[1] == radar_mm)
+            time.sleep(0.2)     # the writer has finished and found the zone as sent
             assert not page.all("command_error")
+            assert len(ha.calls) == sum(1 for v in zone.values() if v)   # no second pass
         finally:
             client.stop()
+
+
+def test_a_corner_the_radar_did_not_take_is_sent_again(setup):
+    """The sensor publishes a corner as soon as it's written, then reads the radar's zone
+    table back. When the radar didn't take it, the old value returns and it's written again."""
+    ha, client, page = setup
+    client.ZONE_SETTLE_S = 0.15
+    ids = zone_ids(1)
+    client.write_zones(SID, KEY, {1: {"x1": -200, "y1": 80, "x2": -20, "y2": 220}})
+    assert wait_until(lambda: ha.radar_zones[1] == [-2000, 800, -200, 2200])
+    ha.lose_zone_writes = 1
+    del ha.calls[:]
+    client.write_zones(SID, KEY, {1: {"x1": -200, "y1": 80, "x2": -20, "y2": 300}})
+    assert wait_until(lambda: ha.radar_zones[1] == [-2000, 800, -200, 3000])
+    page.wait("device_config", lambda d: (d["payload"].get(ee.ZONE_CATEGORY) or {}).get("area1", {}).get("y_max") == 300)
+    assert [(c[2], c[3]) for c in ha.calls] == [(ids["y2"], {"value": 3000})] * 2
+    assert not page.all("command_error")
+
+
+def test_zone_write_says_when_the_radar_keeps_something_else(setup):
+    ha, client, page = setup
+    client.ZONE_SETTLE_S = 0.15
+    ha.lose_zone_writes = 100
+    client.write_zones(SID, KEY, {2: {"x1": -100, "y1": 0, "x2": 100, "y2": 200}})
+    error = page.wait("command_error", timeout=10)
+    assert error["param"] == ee.ZONE_CATEGORY
+    assert "Zone 2" in error["error"] and "different zone" in error["error"]
+
+    def shown():
+        zones = [d["payload"][ee.ZONE_CATEGORY] for d in page.all("device_config") if ee.ZONE_CATEGORY in d["payload"]]
+        return zones[-1].get("area2") if zones else None
+    # The page ends up with what the sensor really has
+    assert wait_until(lambda: shown() == {"x_min": 0, "x_max": 0, "y_min": 0, "y_max": 0})
+
+
+def test_changing_the_zone_type_keeps_the_zones(setup):
+    ha, client, page = setup
+    client.write_zones(SID, KEY, {1: {"x1": -200, "y1": 80, "x2": -20, "y2": 220}})
+    assert wait_until(lambda: ha.radar_zones[1] == [-2000, 800, -200, 2200])
+    client.write_settings(SID, KEY, {"ld2450_zone_type": "Detection"})
+    page.wait("device_config", lambda d: d["payload"].get("ld2450_zone_type") == "Detection")
+    assert wait_until(lambda: ha._radar[1] == "Detection")
+    assert ha.radar_zones[1] == [-2000, 800, -200, 2200]
 
 
 def test_zone_write_reports_a_missing_entity(setup):
@@ -305,7 +394,7 @@ def test_settings_are_written_to_their_entities(setup):
     assert ack == {"params": ["ld2450_zone_type", "ld2412_engineering_mode", "ld2450_timeout"], "status": "sent"}
     assert ha.states[entity_id("select", "LD2450 Zone Type")]["s"] == "Filter"
     assert ha.states[entity_id("switch", "LD2412 Engineering Mode")]["s"] == "on"
-    assert ha.states[entity_id("number", "LD2450 Timeout")]["s"] == "12"
+    assert ha.states[entity_id("number", "LD2450 Timeout")]["s"] == "12.0"
     # The page counts a change as saved when the new value comes back
     echo = page.wait("device_config", lambda d: d["payload"].get("ld2450_zone_type") == "Filter")
     assert echo["topic"] == TOPIC
@@ -320,6 +409,15 @@ def test_a_value_the_sensor_already_has_is_still_confirmed(setup):
     page.wait("device_config", lambda d: d["payload"] == {"ld2450_timeout": 5}, since=at)
 
 
+def test_a_number_sent_as_text_is_confirmed_as_soon_as_it_comes_back(setup):
+    _, client, page = setup
+    client.ECHO_TIMEOUT_S = 30
+    started = time.time()
+    client.write_settings(SID, KEY, {"ld2450_timeout": "45"})
+    page.wait("device_config", lambda d: d["payload"].get("ld2450_timeout") == 45)
+    assert time.time() - started < 5
+
+
 def test_a_setting_whose_entity_is_disabled_is_refused(setup):
     ha, client, page = setup
     client.write_settings(SID, KEY, {"ld2412_distance_resolution": "0.5m", "ld2450_timeout": 30})
@@ -327,7 +425,7 @@ def test_a_setting_whose_entity_is_disabled_is_refused(setup):
     assert error["params"] == ["ld2412_distance_resolution"]
     assert "Distance resolution" in error["error"]
     assert page.wait("command_ack")["params"] == ["ld2450_timeout"]
-    assert ha.states[entity_id("number", "LD2450 Timeout")]["s"] == "30"
+    assert ha.states[entity_id("number", "LD2450 Timeout")]["s"] == "30.0"
 
 
 def test_settings_asked_for_are_sent_and_the_missing_ones_named(setup):
@@ -395,10 +493,29 @@ def test_sync_looks_at_the_registries_again(setup):
 def test_diagnostics_hold_states_and_recent_changes(setup):
     ha, client, _ = setup
     ha.set_state(entity_id("binary_sensor", "LD2450 Presence"), "on")
-    assert wait_until(lambda: any(role == "ld2450_presence" and state == "on"
-                                  for _, role, state in client.diagnostics(KEY)["packets"]))
+    assert wait_until(lambda: any(data == {"role": "ld2450_presence", "state": "on"}
+                                  for _, data in client.diagnostics(KEY)["packets"]))
     parts = client.diagnostics(KEY)
     assert parts["driver"]["stack"] == "esphome" and parts["driver"]["connected"] is True
     assert parts["settings"]["ld2450_presence"] == "on"
     assert parts["device"]["topic"] == TOPIC
     assert client.diagnostics(None)["device"] == {}
+
+
+def test_diagnostics_fit_the_download(setup):
+    """The parts go into the same report as the Zigbee drivers' (GET /diagnostics)."""
+    import diagnostics
+    ha, client, _ = setup
+    ha.set_target(1, -500, 1500)
+    assert wait_until(lambda: any(data == {"role": "t1_x", "state": "-500.0"}
+                                  for _, data in client.diagnostics(KEY)["packets"]))
+    parts = client.diagnostics(KEY)
+    report = diagnostics.build_report(
+        addon={}, options={}, driver=parts["driver"], device={"entry": parts["device"]}, zones={},
+        settings=parts["settings"], layout=None, zone_names=None, history=None,
+        packets=parts["packets"], log_lines=[])
+    json.dumps(report)
+    assert {"role": "t1_x", "state": "-500.0"} in [p["data"] for p in report["packets"]]
+    assert all(p["t"] for p in report["packets"])
+    assert report["device"]["entry"]["roles"]["t1_x"] == entity_id("sensor", "LD2450 Target-1 X")
+    assert report["settings"]["z1_x1"] == "0.0"

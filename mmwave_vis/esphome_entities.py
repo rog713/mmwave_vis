@@ -78,6 +78,11 @@ def validate(key, value):
     return True, None
 
 
+def as_reported(key, value):
+    """A validated value as setting_from_state() reports it back: the page may send "5" for 5."""
+    return value if SETTINGS[key].get('options') else _as_int(value)
+
+
 def setting_from_state(key, state):
     """The page's value for a setting from its entity's state, or None if it has none."""
     s = setting(key)
@@ -107,9 +112,9 @@ def service_call(key, value):
 # ---------------------------------------------------------------------------
 # ESPHome names an entity once, in the device's YAML ("LD2450 Target-1 X"), and
 # Home Assistant derives three things from it: the registry's original_name, the
-# object id inside the unique_id ("<mac>-sensor-ld2450_target-1_x") and the
-# entity_id ("sensor.apollo_r_pro_1_ab12cd_ld2450_target_1_x"). People rename
-# entities and devices, so all three are tried, most trustworthy first.
+# unique_id (see name_in_unique_id) and the entity_id
+# ("sensor.apollo_r_pro_1_ab12cd_ld2450_target_1_x"). People rename entities and
+# devices, so all three are tried, most trustworthy first.
 
 def slug(text):
     """'LD2450 Target-1 X' and 'ld2450_target-1_x' → 'ld2450_target_1_x'."""
@@ -180,7 +185,23 @@ LIVE_PERCENTS = ('ld2412_move_energy', 'ld2412_still_energy')
 GATE_ROLES = frozenset(f'g{g}_{kind}' for g in range(GATE_COUNT) for kind in ('move', 'still'))
 BUTTONS = ('ld2450_restart', 'ld2450_factory_reset', 'ld2412_restart', 'ld2412_factory_reset', 'ld2412_calibrate')
 
-_UNIQUE_ID = re.compile(r'^[0-9a-f:]{12,17}(?:@\w+)?-[a-z_]+-(.+)$', re.IGNORECASE)
+# The unique_ids of ESPHome entities come in three forms (aioesphomeapi's build_unique_id):
+#   <mac>/0/sensor/LD2450 Target-1 X     the name, after the sub-device (0: the device itself);
+#                                        what Home Assistant builds now
+#   <mac>-sensor-ld2450_target-1_x       ESPHome's object id for the name; what it built before,
+#                                        and what an install that hasn't been migrated still has
+#   <mac>-sensor-LD2450 Target-1 X       the name
+# The two with dashes end in "@<sub-device>" for an entity of a sub-device.
+_UNIQUE_ID_SLASHES = re.compile(r'^[0-9a-f:]{12,17}/\d+/[a-z_]+/(.+)$', re.IGNORECASE)
+_UNIQUE_ID_DASHES = re.compile(r'^[0-9a-f:]{12,17}-[a-z_]+-(.+?)(?:@\d+)?$', re.IGNORECASE)
+
+
+def name_in_unique_id(unique_id):
+    """The entity's ESPHome name (or object id) out of its unique_id, or None."""
+    if not isinstance(unique_id, str):
+        return None
+    m = _UNIQUE_ID_SLASHES.match(unique_id) or _UNIQUE_ID_DASHES.match(unique_id)
+    return m.group(1) if m else None
 
 
 def role_of(entry):
@@ -189,7 +210,7 @@ def role_of(entry):
     domain, _, object_id = entity_id.partition('.')
     if not object_id:
         return None
-    for name in (entry.get('original_name'), (_UNIQUE_ID.match(entry.get('unique_id') or '') or [None, None])[1]):
+    for name in (entry.get('original_name'), name_in_unique_id(entry.get('unique_id'))):
         role = ROLES.get((domain, slug(name))) if name else None
         if role:
             return role
@@ -388,14 +409,29 @@ def native_zone_value(cm, attrs):
         v = max(lo, v)
     if hi is not None:
         v = min(hi, v)
-    # Whole millimetres stay whole; other units keep what they need
-    return int(round(v)) if abs(v - round(v)) < 1e-6 else round(v, 3)
+    if abs(v - round(v)) < 1e-6:
+        return int(round(v))        # whole millimetres stay whole
+    # Another unit, which Home Assistant converts back to millimetres. Cut towards zero:
+    # the sensor ignores a value even a hair past the number's own range, and the range
+    # Home Assistant reports is rounded outwards.
+    return math.trunc(v * 1000) / 1000
 
 
-def same_length(state, attrs, cm, tolerance_cm=0.1):
-    """Whether a number entity already holds `cm` (within a millimetre)."""
-    have = length_cm(state, (attrs or {}).get('unit_of_measurement'))
-    return have is not None and abs(have - cm) <= tolerance_cm
+def same_length(state, attrs, cm):
+    """Whether a number entity already holds `cm`.
+
+    The sensor keeps whole millimetres and drops the rest. When the number is shown in
+    another unit, Home Assistant also rounds what it shows to one decimal of that unit
+    (a tenth of an inch is 2.5 mm), so that much more is allowed.
+    """
+    unit = (attrs or {}).get('unit_of_measurement') or 'mm'
+    have = length_cm(state, unit)
+    if have is None:
+        return False
+    tolerance_cm = 0.15
+    if unit != 'mm':
+        tolerance_cm += 0.05 * _MM[unit] / 10
+    return abs(have - cm) <= tolerance_cm
 
 
 # ---------------------------------------------------------------------------

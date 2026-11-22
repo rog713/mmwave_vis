@@ -442,7 +442,8 @@ class EsphomeClient:
                 'stack_versions': None,
                 'device': json.loads(json.dumps(dev, default=str)),
                 'settings': states,
-                'packets': list(self.packets.get(key) or []),
+                # (time, data) pairs, as diagnostics.build_report takes them from every driver
+                'packets': [(t, {'role': role, 'state': state}) for t, role, state in self.packets.get(key) or []],
             }
 
     # --- Writing ---------------------------------------------------------------------------
@@ -506,7 +507,7 @@ class EsphomeClient:
                         refused.append(name)
                         errors.append(f"Couldn't change {title}: {e}")
                         continue
-                    written.append((name, entity_id, value))
+                    written.append((name, entity_id, ee.as_reported(name, value)))
         except ha_ws.HAError as e:
             lost = [n for n in values if n not in refused and n not in [w[0] for w in written]]
             if lost:

@@ -14,14 +14,14 @@ import pytest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'mmwave_vis'))
 
 import esphome_entities as ee
-from tests.fake_ha import MAC, r_pro_1, entity_id, object_id
+from tests.fake_ha import MAC, r_pro_1, entity_id, unique_id
 
 
-def registry(length_unit="mm"):
+def registry(length_unit="mm", unique_ids="name"):
     """The R PRO-1's entity registry entries, as Home Assistant lists them."""
     return [{
         "entity_id": entity_id(domain, name), "original_name": name,
-        "unique_id": f"{MAC}-{platform}-{object_id(name)}",
+        "unique_id": unique_id(platform, name, unique_ids),
         "disabled_by": "integration" if disabled else None,
     } for domain, platform, name, _state, _attrs, disabled in r_pro_1(length_unit)]
 
@@ -82,10 +82,36 @@ def test_presence_is_not_mistaken_for_the_target_count():
     assert roles["ld2450_presence"].startswith("binary_sensor.")
 
 
-def test_role_from_the_unique_id_when_the_entity_was_renamed():
-    entry = {"entity_id": "sensor.couch_x", "original_name": None,
-             "unique_id": f"{MAC}-sensor-ld2450_target-1_x"}
-    assert ee.role_of(entry) == "t1_x"
+@pytest.mark.parametrize("unique", [
+    f"{MAC}/0/sensor/LD2450 Target-1 X",        # Home Assistant now: the name, after the sub-device
+    f"{MAC}-sensor-ld2450_target-1_x",          # before: ESPHome's object id for the name
+    f"{MAC}-sensor-LD2450 Target-1 X",          # or the name
+    "aabbcca1b2c3-sensor-ld2450_target-1_x",
+])
+def test_role_from_the_unique_id_when_the_entity_was_renamed(unique):
+    assert ee.role_of({"entity_id": "sensor.couch_x", "original_name": None, "unique_id": unique}) == "t1_x"
+
+
+def test_name_in_a_unique_id():
+    assert ee.name_in_unique_id(f"{MAC}/0/number/LD2450 Zone-2 X1") == "LD2450 Zone-2 X1"
+    assert ee.name_in_unique_id(f"{MAC}/0/text_sensor/Apollo Firmware Version") == "Apollo Firmware Version"
+    assert ee.name_in_unique_id(f"{MAC}-binary_sensor-ld2450_presence") == "ld2450_presence"
+    # An entity of a sub-device, in the older forms
+    assert ee.name_in_unique_id(f"{MAC}-sensor-ld2450_target-1_x@3232") == "ld2450_target-1_x"
+    assert ee.name_in_unique_id(f"{MAC}/3232/sensor/Battery") == "Battery"
+    for other in (None, "", 17, "0x0c2a6ffffef6f6a7-1-1030", "not a unique id"):
+        assert ee.name_in_unique_id(other) is None
+
+
+@pytest.mark.parametrize("unique_ids", ["name", "object_id"])
+def test_every_role_is_found_from_the_unique_id_alone(unique_ids):
+    """Entities renamed in Home Assistant and listed without their original name."""
+    named = registry()
+    bare = [{**e, "original_name": None, "entity_id": f"{e['entity_id'].split('.')[0]}.thing_{i}"}
+            for i, e in enumerate(registry(unique_ids=unique_ids))]
+    by_name, _ = ee.entity_roles(named)
+    by_unique_id, _ = ee.entity_roles(bare)
+    assert set(by_unique_id) == set(by_name)
 
 
 def test_role_from_the_entity_id_alone():
@@ -101,6 +127,16 @@ def test_text_sensors_are_sensors_in_home_assistant():
     entry = {"entity_id": "sensor.r_pro_1_apollo_firmware_version", "original_name": "Apollo Firmware Version",
              "unique_id": f"{MAC}-text_sensor-apollo_firmware_version"}
     assert ee.role_of(entry) == "firmware"
+    assert ee.role_of({"entity_id": "sensor.fw", "unique_id": f"{MAC}/0/text_sensor/Apollo Firmware Version"}) == "firmware"
+
+
+def test_same_named_entities_of_other_kinds_get_no_role():
+    # The firmware has a "Firmware Update" button beside its update entity
+    assert ee.role_of({"entity_id": entity_id("update", "Firmware Update"), "original_name": "Firmware Update"}) == "update"
+    assert ee.role_of({"entity_id": entity_id("button", "Firmware Update"), "original_name": "Firmware Update"}) is None
+    # ... and target counts for the whole radar that aren't a zone's
+    assert ee.role_of({"entity_id": entity_id("sensor", "LD2450 Still Target Count")}) is None
+    assert ee.role_of({"entity_id": entity_id("sensor", "LD2412 Light")}) is None
 
 
 def test_a_device_without_position_entities_is_not_a_tracker():
@@ -165,7 +201,7 @@ def test_targets_in_whole_centimetres():
 
 def test_untracked_targets_are_left_out():
     read = reader({
-        "t1_x": "0", "t1_y": "0", "t1_speed": "0",              # older firmware: 0, 0
+        "t1_x": "0.0", "t1_y": "0.0", "t1_speed": "0.0",        # older firmware: 0, 0
         "t2_x": "unavailable", "t2_y": "unavailable",
         "t3_x": "500", "t3_y": "unknown",
     })
@@ -177,7 +213,8 @@ def test_a_target_straight_ahead_is_kept():
 
 
 def test_targets_on_a_us_customary_install():
-    targets = ee.build_targets(reader({"t1_x": ("39.37", "in"), "t1_y": ("78.74", "in"), "t1_speed": ("0", "mm/s")}))
+    targets = ee.build_targets(reader({"t1_x": ("39.37007874015748", "in"), "t1_y": ("78.74015748031496", "in"),
+                                       "t1_speed": ("0.0", "in/s")}))
     assert targets == [{"id": 1, "x": 100, "y": 200, "z": 0, "dop": 0}]
 
 
@@ -242,10 +279,19 @@ def test_zone_value_in_the_entitys_unit():
     mm = {"unit_of_measurement": "mm", "min": -4860, "max": 4860}
     assert ee.native_zone_value(-123, mm) == -1230
     assert isinstance(ee.native_zone_value(-123, mm), int)
-    inches = {"unit_of_measurement": "in", "min": -191.339, "max": 191.339}
-    assert ee.native_zone_value(254, inches) == pytest.approx(100)
-    assert ee.native_zone_value(-123, inches) == pytest.approx(-48.425, abs=1e-3)
     assert ee.native_zone_value(100, None) == 1000
+
+
+def test_zone_value_in_inches_never_passes_the_sensors_range():
+    # Home Assistant rounds the range it reports outwards (-4860 mm is -191.339 in), and
+    # the sensor ignores a value that converts back to even a hair more than its own
+    inches = {"unit_of_measurement": "in", "min": -191.4, "max": 191.4}
+    assert ee.native_zone_value(254, inches) == 100
+    assert ee.native_zone_value(-123, inches) == -48.425
+    for cm in (-486, 486, -123, 7, 50, 333):
+        mm = ee.native_zone_value(cm, inches) * 25.4
+        assert abs(mm) <= abs(cm) * 10 + 1e-9, cm          # never further out than asked
+        assert abs(cm) * 10 - abs(mm) < 0.03, cm           # and a whisker short at most
 
 
 def test_zone_value_stays_inside_the_entitys_range():
@@ -255,10 +301,20 @@ def test_zone_value_stays_inside_the_entitys_range():
 
 
 def test_same_length_allows_for_unit_rounding():
-    assert ee.same_length("1230", {"unit_of_measurement": "mm"}, 123)
-    assert ee.same_length("48.425", {"unit_of_measurement": "in"}, 123)
-    assert not ee.same_length("1240", {"unit_of_measurement": "mm"}, 123)
-    assert not ee.same_length("unknown", {"unit_of_measurement": "mm"}, 0)
+    mm, inches = {"unit_of_measurement": "mm"}, {"unit_of_measurement": "in"}
+    assert ee.same_length("1230.0", mm, 123)
+    assert ee.same_length("1229.0", mm, 123)            # the sensor dropped a fraction of a millimetre
+    assert not ee.same_length("1240.0", mm, 123)
+    assert not ee.same_length("1220.0", mm, 123)
+    assert ee.same_length("1230", None, 123)            # no unit given: millimetres
+    assert not ee.same_length("unknown", mm, 0)
+    # In inches Home Assistant shows one decimal: 1229 mm is 48.4 in, 499 mm is 19.6 in
+    assert ee.same_length("48.425", inches, 123)
+    assert ee.same_length("48.4", inches, 123)
+    assert ee.same_length("19.6", inches, 50)
+    assert not ee.same_length("19.5", inches, 50)
+    assert not ee.same_length("48.0", inches, 123)
+    assert not ee.same_length("5.0", {"unit_of_measurement": "furlongs"}, 123)
 
 
 # ===========================================================================
