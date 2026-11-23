@@ -242,8 +242,6 @@ a.btn.off { opacity: 0.45; pointer-events: none; }
 .radar .fov-ext { fill: none; stroke: var(--map-fov-line); stroke-opacity: 0.5; stroke-width: 1; stroke-dasharray: 6 5; }
 .radar .ring { fill: none; stroke: var(--map-fov-line); stroke-opacity: 0.45; stroke-width: 1; stroke-dasharray: 2 5; }
 .radar .ring-label { fill: var(--text-3); font-size: 11px; }
-.radar .ceiling-band { fill: var(--text-3); fill-opacity: 0.12; stroke: none; }
-.radar .ceiling-note { fill: var(--text-3); font-size: 11px; }
 .radar .axis-end { fill: var(--text-2); font-size: 12px; font-weight: 600; paint-order: stroke; stroke: var(--surface); stroke-width: 3px; stroke-linejoin: round; }
 
 .radar .room { fill: none; stroke: var(--text-2); stroke-width: 3; stroke-linejoin: round; }
@@ -259,6 +257,9 @@ a.btn.off { opacity: 0.45; pointer-events: none; }
 .radar .zone[data-zone] { cursor: pointer; }
 .radar .zone[data-zone]:hover { stroke-width: 2.5; }
 .radar .zone.dim { opacity: 0.35; }
+/* Under a ceiling the radar can't tell the two sides of its line apart: the copy on the other side */
+.radar .zone.other-side { fill-opacity: 0.05; stroke-dasharray: 2 5; }
+.radar .zone.det.occupied.other-side { fill-opacity: 0.14; }
 .radar .zone.draft { stroke-width: 2; stroke-dasharray: 6 4; cursor: move; }
 .radar .zone.pending { stroke-dasharray: 3 4; animation: pending-pulse 1.4s ease-in-out infinite; }
 @keyframes pending-pulse { 50% { stroke-opacity: 0.35; } }
@@ -285,6 +286,7 @@ a.btn.off { opacity: 0.45; pointer-events: none; }
 .radar .rec-3 .rec-dots, .radar .rec-3 .rec-bounds { stroke: var(--rec-3); }
 
 .radar .trail { fill: none; stroke: var(--target); stroke-opacity: 0.3; stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; pointer-events: none; }
+.radar .target-other { fill: none; stroke: var(--target); stroke-width: 2; stroke-dasharray: 3 3; pointer-events: none; }
 .radar .target-dot { fill: var(--target); stroke: var(--surface); stroke-width: 2.5; pointer-events: none; }   /* a zone under a person stays clickable */
 .radar .target-label {
     fill: var(--text); font-size: 12px; pointer-events: none;
@@ -692,6 +694,9 @@ body:not(.stack-esphome) .esphome-only { display: none !important; }
 .radar .range-label.moving { fill: var(--accent); }
 .radar .range-label.still { fill: var(--stay); }
 .swatch-line { width: 16px; height: 0; border-top: 2px solid; flex: none; display: inline-block; }
+.swatch-ring { width: 10px; height: 10px; border-radius: 50%; border: 2px dashed var(--target); flex: none; display: inline-block; box-sizing: border-box; }
+.legend .legend-other-side { display: none; }
+.map.ceiling .legend .legend-other-side { display: inline-flex; }
 .swatch-line.moving { border-color: var(--accent); }
 .swatch-line.still { border-color: var(--stay); border-top-style: dashed; }
 

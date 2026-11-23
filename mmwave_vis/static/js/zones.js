@@ -1,6 +1,7 @@
 // Zones: reading them from switch reports, the zone list, and the editor.
 
 import { state, on, emit, ZONE_TYPES, AREAS, ZONE_KEYS, ZONE_LIMITS, AREA_CATEGORY, HAS_HEIGHT, ESPHOME, DEV, zoneName, slotName, customName } from './state.js';
+import { shownY, radarY } from './ceiling.js';
 import { $, h, toast, setNotice, clearNotice, confirmAction, span, plural, copyText } from './ui.js';
 import { setName, setNames } from './names.js';
 
@@ -345,7 +346,8 @@ export function zoneToDevicePayload(category, zone) {
 // --- Zone list ---------------------------------------------------------------
 
 function dims(z) {
-    const flat = `W ${span(z.x_min, z.x_max)} · D ${span(z.y_min, z.y_max)}`;
+    // Under a ceiling, depth is shown as the map draws it: across the floor, to the side of the line
+    const flat = `W ${span(z.x_min, z.x_max)} · D ${span(shownY(z.y_min), shownY(z.y_max))}`;
     return HAS_HEIGHT ? `${flat} · H ${span(z.z_min, z.z_max)}` : flat;
 }
 
@@ -467,7 +469,7 @@ export function renderZoneList() {
 function fillInputs() {
     const d = state.edit.draft;
     for (const k of ZONE_KEYS) {
-        const v = String(d[k]);
+        const v = String(k[0] === 'y' ? shownY(d[k]) : d[k]);
         if (inputs[k].value !== v) inputs[k].value = v;
     }
     if (activeDims) activeDims.textContent = dims(d);
@@ -579,7 +581,8 @@ function draftFromInputs() {
     for (const k of ZONE_KEYS) {
         const v = parseInt(inputs[k].value, 10);
         if (Number.isNaN(v)) return;          // still typing ("-")
-        values[k] = v;
+        // A depth that wasn't retyped keeps the radar's own number, which the shown one rounds
+        values[k] = k[0] !== 'y' ? v : v === shownY(state.edit.draft[k]) ? state.edit.draft[k] : radarY(v);
     }
     Object.assign(state.edit.draft, values);
     if (activeDims) activeDims.textContent = dims(state.edit.draft);
@@ -678,6 +681,8 @@ export function initZones() {
         emit('zones');
     };
     on('names', refresh);
+    // The map changed between the radar's numbers and the floor under a ceiling
+    on('ceiling', () => { if (state.edit) fillInputs(); else renderZoneList(); });
     on('device-info', refresh);
     renderZoneList();
 }

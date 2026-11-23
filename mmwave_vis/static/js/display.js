@@ -179,6 +179,16 @@ function tidyLayout(l) {
 
 const sameLayout = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 
+// The map is the floor from above while a sensor is on a ceiling: tell the zone list, the
+// table and the legend when that (or the drop it's worked out from) changes
+function setLayout(l) {
+    const before = JSON.stringify(state.layout.ceiling || null);
+    const wasOn = !!state.layout.ceiling;
+    state.layout = l;
+    if (JSON.stringify(l.ceiling || null) !== before) emit('ceiling');
+    return wasOn !== !!l.ceiling;      // the other kind of map: its usual view no longer fits
+}
+
 function scheduleSave() {
     clearTimeout(saveTimer);
     const topic = state.device;
@@ -205,15 +215,16 @@ function changeLayout(mutate) {
     const l = copyLayout(state.layout);
     mutate(l);
     tidyLayout(l);
-    state.layout = l;
+    const otherMap = setLayout(l);
     radar.setLayout(l);
     fillLayout();
     scheduleSave();
+    if (otherMap) fullRange();
 }
 
 // The map moved the switch or the room
 export function layoutFromMap(layout, final) {
-    state.layout = copyLayout(layout);
+    setLayout(copyLayout(layout));
     if (final) {
         tidyLayout(state.layout);
         if (!sameLayout(state.layout, layout)) radar.setLayout(state.layout);
@@ -225,9 +236,10 @@ export function layoutFromMap(layout, final) {
 // A layout arrived from the addon (device change, or another browser saved one)
 export function layoutFromServer(layout) {
     // A save still waiting on its timer already holds its own switch and layout, so let it run
-    state.layout = layout ? copyLayout(layout) : { ...EMPTY_LAYOUT };
+    const otherMap = setLayout(layout ? copyLayout(layout) : { ...EMPTY_LAYOUT });
     radar.setLayout(state.layout);
     fillLayout();
+    if (otherMap) fullRange();
 }
 
 function defaultRoom() {

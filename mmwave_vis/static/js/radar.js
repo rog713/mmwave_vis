@@ -2,9 +2,15 @@
 // at any zoom. Everything the switch reports (zones, targets, field of view)
 // lives in the sensor's own frame; the room layout places the sensor in the
 // room ("world") frame, and the view maps the world onto the screen.
+//
+// A sensor on a ceiling (layout.ceiling) is drawn as the floor from above. Between the
+// sensor's frame and the world there is then a "floor" frame: x as the radar gives it and
+// y the distance to the side of the radar's left-right line (see ceiling.js). The radar
+// can't tell the two sides apart, so zones and people are drawn on both.
 
 import { ZONE_TYPES, AREAS, HAS_HEIGHT, DEV } from './state.js';
 import { num } from './ui.js';
+import { floorFromRaw, rawFromFloor } from './ceiling.js';
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
 const DEG = Math.PI / 180;
@@ -163,9 +169,12 @@ export class Radar {
     setLayout(layout) {
         if (this.drag && ['sensor', 'rotate'].includes(this.drag.kind)) return;
         if (this.drag && this.drag.owner === 'room') return;
+        const before = JSON.stringify(this.layout.ceiling);
         this.layout = { x: layout.x || 0, y: layout.y || 0, rot: layout.rot || 0, room: layout.room ? { ...layout.room } : null, mirror: !!layout.mirror,
             ceiling: layout.ceiling ? { ...layout.ceiling } : null };
         this.invalidate('all');
+        // The heat map and the recording are images in the floor frame
+        if (JSON.stringify(this.layout.ceiling) !== before) this.invalidate('heatData', 'recData');
     }
 
     // `pending` holds "category:area" keys the switch hasn't confirmed yet; they're drawn dashed
@@ -243,7 +252,11 @@ export class Radar {
     // Box (in the world frame) around points given in the sensor frame plus the room
     _worldBox(sensorPts, buffer) {
         const xs = [], ys = [];
-        for (const p of sensorPts) { const w = this.s2w(p[0], p[1]); xs.push(w[0]); ys.push(w[1]); }
+        for (const p of sensorPts) {
+            const w = this.s2w(p[0], p[1]);
+            xs.push(w[0]); ys.push(w[1]);
+            if (this.ceil) { const o = this._other(p[0], p[1]); xs.push(o[0]); ys.push(o[1]); }
+        }
         const room = this.layout.room;
         if (room) { xs.push(room.x_min, room.x_max); ys.push(room.y_min, room.y_max); }
         if (!xs.length) return null;
@@ -257,6 +270,15 @@ export class Radar {
     fullRange() {
         const d = DEFAULT_RANGE;
         this._computeTransform();
+        if (this.ceil) {
+            // The whole floor around the sensor: the same reach on both sides of its line
+            const r = FOV_RANGE;
+            const w = [[-r, -r], [r, -r], [r, r], [-r, r]].map(p => this.f2w(p[0], p[1]));
+            const xs = w.map(p => p[0]), ys = w.map(p => p[1]);
+            const room = this.layout.room;
+            if (room) { xs.push(room.x_min, room.x_max); ys.push(room.y_min, room.y_max); }
+            return { xMin: Math.round(Math.min(...xs)), xMax: Math.round(Math.max(...xs)), yMin: Math.round(Math.min(...ys)), yMax: Math.round(Math.max(...ys)) };
+        }
         return this._worldBox([[d.xMin, d.yMin], [d.xMax, d.yMin], [d.xMax, d.yMax], [d.xMin, d.yMax]], 0);
     }
 
@@ -315,17 +337,31 @@ export class Radar {
         // A mirrored layout draws the sensor's x axis the other way round (a sensor mounted
         // the other way up); everything else follows from these two transforms
         this.mx = this.layout.mirror ? -1 : 1;
+        // On a ceiling: the map is the floor from above (ceiling.js)
+        this.ceil = !!this.layout.ceiling;
+        this.drop = this.ceil ? Number(this.layout.ceiling.drop) || 0 : 0;
     }
 
     w2p(wx, wy) { return [this.W / 2 + (wx - this.cx) * this.k, this.H / 2 - (wy - this.cy) * this.k]; }
     p2w(px, py) { return [this.cx + (px - this.W / 2) / this.k, this.cy - (py - this.H / 2) / this.k]; }
-    s2w(x, y) { x *= this.mx; return [x * this.cs - y * this.sn + this.layout.x, x * this.sn + y * this.cs + this.layout.y]; }
-    w2s(wx, wy) {
+    // Floor frame ↔ world. Off a ceiling the floor frame is the sensor's own.
+    f2w(x, y) { x *= this.mx; return [x * this.cs - y * this.sn + this.layout.x, x * this.sn + y * this.cs + this.layout.y]; }
+    w2f(wx, wy) {
         const dx = wx - this.layout.x, dy = wy - this.layout.y;
         return [(dx * this.cs + dy * this.sn) * this.mx, -dx * this.sn + dy * this.cs];
     }
+    f2p(x, y) { const w = this.f2w(x, y); return this.w2p(w[0], w[1]); }
+    p2f(px, py) { const w = this.p2w(px, py); return this.w2f(w[0], w[1]); }
+    // Sensor frame ↔ world. A point on either side of the line is the same point to the radar.
+    _fy(y) { return this.ceil ? floorFromRaw(y, this.drop) : y; }
+    _ry(s) { return this.ceil ? rawFromFloor(s, this.drop) : s; }
+    s2w(x, y) { return this.f2w(x, this._fy(y)); }
+    w2s(wx, wy) { const f = this.w2f(wx, wy); return [f[0], this._ry(f[1])]; }
     s2p(x, y) { const w = this.s2w(x, y); return this.w2p(w[0], w[1]); }
     p2s(px, py) { const w = this.p2w(px, py); return this.w2s(w[0], w[1]); }
+    // The same sensor point on the other side of the line, in the world and on screen
+    _other(x, y) { return this.f2w(x, -this._fy(y)); }
+    _otherP(x, y) { const w = this._other(x, y); return this.w2p(w[0], w[1]); }
 
     // --- Rendering --------------------------------------------------------
 
@@ -362,31 +398,30 @@ export class Radar {
         const g = this.layers.grid;
         g.replaceChildren();
         const { W, H, k } = this;
-        // The viewport in sensor coordinates, so the grid follows the switch's axes
-        const c = [[0, 0], [W, 0], [0, H], [W, H]].map(p => this.p2s(p[0], p[1]));
+        // The viewport in the switch's frame (the floor frame under a ceiling), so the grid follows its axes
+        const c = [[0, 0], [W, 0], [0, H], [W, H]].map(p => this.p2f(p[0], p[1]));
         const x0 = Math.min(...c.map(p => p[0])), x1 = Math.max(...c.map(p => p[0]));
         const y0 = Math.min(...c.map(p => p[1])), y1 = Math.max(...c.map(p => p[1]));
         const step = [25, 50, 100, 200, 500, 1000, 2000].find(s => s * k >= 36) || 5000;
         let minor = '', axes = '';
         const seg = (a, b) => `M${r1(a[0])} ${r1(a[1])}L${r1(b[0])} ${r1(b[1])}`;
         for (let x = Math.ceil(x0 / step) * step; x <= x1; x += step) {
-            const s = seg(this.s2p(x, y0), this.s2p(x, y1));
+            const s = seg(this.f2p(x, y0), this.f2p(x, y1));
             if (x === 0) axes += s; else minor += s;
         }
         for (let y = Math.ceil(y0 / step) * step; y <= y1; y += step) {
-            const s = seg(this.s2p(x0, y), this.s2p(x1, y));
+            const s = seg(this.f2p(x0, y), this.f2p(x1, y));
             if (y === 0) axes += s; else minor += s;
         }
         el('path', { class: 'grid', d: minor }, g);
         el('path', { class: 'grid-axis', d: axes }, g);
-        this._renderCeiling(g);
 
         // cm ticks along the switch's wall (x) and straight out from it (y)
         const every = step * k >= 52 ? step : step * 2;
         const inView = p => p[0] > 4 && p[0] < W - 4 && p[1] > 4 && p[1] < H - 4;
         for (let x = Math.ceil(x0 / every) * every; x <= x1; x += every) {
             if (x === 0) continue;
-            const p = this.s2p(x, -14 / k);
+            const p = this.f2p(x, -14 / k);
             if (inView(p)) el('text', { class: 'tick', x: r1(p[0]), y: r1(p[1]), 'text-anchor': 'middle', 'dominant-baseline': 'middle' }, g).textContent = num(x);
         }
         // Depth ticks sit at the map's edge rather than on the centre line, where zones and people are.
@@ -395,16 +430,19 @@ export class Radar {
         const dir = [this.cs, -this.sn];                    // sensor x axis on screen
         const leftEdge = Math.abs(dir[0]) >= Math.abs(dir[1]);
         for (let y = Math.ceil(y0 / every) * every; y <= y1; y += every) {
-            const o = this.s2p(0, y);
+            const o = this.f2p(0, y);
+            // Under a ceiling both sides of the line count the same way
+            const text = num(this.ceil ? Math.abs(y) : y);
             if (leftEdge) {
                 const py = o[1] + (8 - o[0]) * dir[1] / dir[0];
-                if (py > 12 && py < H - 34) el('text', { class: 'tick', x: 8, y: r1(py - 4) }, g).textContent = num(y);
+                if (py > 12 && py < H - 34) el('text', { class: 'tick', x: 8, y: r1(py - 4) }, g).textContent = text;
             } else {
                 const px = o[0] + (14 - o[1]) * dir[0] / dir[1];
-                if (px > 20 && px < W - 20) el('text', { class: 'tick', x: r1(px + 4), y: 14, 'dominant-baseline': 'middle' }, g).textContent = num(y);
+                if (px > 20 && px < W - 20) el('text', { class: 'tick', x: r1(px + 4), y: 14, 'dominant-baseline': 'middle' }, g).textContent = text;
             }
         }
 
+        if (this.ceil) { this._renderCeiling(g); return; }
         if (!this.vis.grid) return;
         const o = this.s2p(0, 0);
         const at = (r, deg) => this._at(r, deg);
@@ -425,32 +463,36 @@ export class Radar {
         }
     }
 
-    // A sensor looking down from a ceiling measures one angle and a distance, so its map isn't
-    // a floor plan: only x is a line across the floor, y is the distance from the sensor in
-    // every other direction (downwards included), and nobody shows closer than the gap between
-    // the ceiling and a person. Shade that gap, name the two ends of the x axis and say what
-    // further out means.
+    // The floor from above, under a sensor on a ceiling: a ring for every metre across the
+    // floor from the point under the sensor, and the names of what is at the two ends of the
+    // radar's left-right line. (Off a ceiling the field of view is drawn instead.)
     _renderCeiling(g) {
         const c = this.layout.ceiling;
-        if (!c) return;
         const { W, H, k } = this;
         const inView = p => p[0] > 4 && p[0] < W - 4 && p[1] > 4 && p[1] < H - 4;
-        const note = (p, text, cls) => el('text', { class: cls, x: r1(p[0]), y: r1(p[1]), 'text-anchor': 'middle', 'dominant-baseline': 'middle' }, g).textContent = text;
-        const across = Math.abs(this.cs) >= Math.abs(this.sn);     // the x axis runs across the screen
-        if (c.drop > 0) {
-            el('polygon', { class: 'ceiling-band', points: pts([[-FOV_RANGE, 0], [FOV_RANGE, 0], [FOV_RANGE, c.drop], [-FOV_RANGE, c.drop]].map(p => this.s2p(p[0], p[1]))) }, g);
-            const p = this.s2p(-FOV_RANGE / 2, c.drop / 2);
-            if (across && c.drop * k >= 18 && inView(p)) note(p, 'Nobody shows this close', 'ceiling-note');
+        if (this.vis.grid) {
+            let rings = '';
+            for (let r = 100; r <= FOV_RANGE; r += 100) rings += this._circle(r);
+            el('path', { class: 'ring', d: rings }, g);
+            if (100 * k >= 22) {
+                for (let r = 100; r <= FOV_RANGE; r += 100) {
+                    const p = this.f2p(r * Math.SQRT1_2, r * Math.SQRT1_2);
+                    if (inView(p)) el('text', { class: 'ring-label', x: r1(p[0] + 3), y: r1(p[1] - 3) }, g).textContent = `${r / 100} m`;
+                }
+            }
         }
         for (const [name, side] of [[c.neg, -1], [c.pos, 1]]) {
             if (!name) continue;
-            // Under the axis, below its tick numbers; inside the shaded band when that's off the map
-            let p = this.s2p(side * FOV_RANGE * 0.8, -32 / k);
-            if (!inView(p)) p = this.s2p(side * FOV_RANGE * 0.8, 12 / k);
-            if (inView(p)) note(p, name, 'axis-end');
+            // By its end of the line, clear of the tick numbers under it
+            const p = this.f2p(side * FOV_RANGE * 0.82, 20 / k);
+            if (inView(p)) el('text', { class: 'axis-end', x: r1(p[0]), y: r1(p[1]), 'text-anchor': 'middle', 'dominant-baseline': 'middle' }, g).textContent = name;
         }
-        const far = this.s2p(0, FOV_RANGE + 18 / k);
-        if (inView(far)) note(far, 'Further out: off this line, on either side', 'ceiling-note');
+    }
+
+    // SVG path of the whole circle `r` cm across the floor from the sensor
+    _circle(r) {
+        const o = this.f2p(0, 0), R = r1(r * this.k);
+        return `M${r1(o[0] - r * this.k)} ${r1(o[1])}A${R} ${R} 0 1 0 ${r1(o[0] + r * this.k)} ${r1(o[1])}A${R} ${R} 0 1 0 ${r1(o[0] - r * this.k)} ${r1(o[1])}`;
     }
 
     // A point `r` cm from the sensor, `deg` degrees right of straight ahead, on screen
@@ -470,6 +512,18 @@ export class Radar {
         const placed = [];
         for (const { r, cls, label } of this.ranges) {
             if (!(r > 0)) continue;
+            if (this.ceil) {
+                // A distance from the sensor is a circle on the floor, smaller by the drop
+                const across = floorFromRaw(r, this.drop);
+                if (!(across > 0)) continue;
+                el('path', { class: `range-arc ${cls}`, d: this._circle(across) }, g);
+                const p = this.f2p(-across * Math.SQRT1_2, across * Math.SQRT1_2);
+                let y = p[1];
+                for (const other of placed) if (Math.abs(y - other) < 13) y = other + 13;
+                placed.push(y);
+                el('text', { class: `range-label ${cls}`, x: r1(p[0] - 4), y: r1(y - 4), 'text-anchor': 'end' }, g).textContent = label;
+                continue;
+            }
             el('path', { class: `range-arc ${cls}`, d: this._arc(r, -FOV_RATED, FOV_RATED) }, g);
             // The label sits at the end of its arc away from the ring labels, running away
             // from the cone whichever way the sensor is turned; two close distances are
@@ -507,8 +561,9 @@ export class Radar {
         const heat = this.heat;
         if (!heat || !heat.cells || !heat.cells.length) return;
         const cell = heat.cell || 10;
+        const cells = this.ceil ? this._floorCells(heat.cells, cell) : heat.cells;
         let ix0 = Infinity, ix1 = -Infinity, iy0 = Infinity, iy1 = -Infinity;
-        for (const [ix, iy] of heat.cells) {
+        for (const [ix, iy] of cells) {
             if (ix < ix0) ix0 = ix;
             if (ix > ix1) ix1 = ix;
             if (iy < iy0) iy0 = iy;
@@ -517,7 +572,7 @@ export class Radar {
         const w = ix1 - ix0 + 1 + 2 * HEAT_PAD, h = iy1 - iy0 + 1 + 2 * HEAT_PAD;
         if (w * h > 1_000_000) return;   // can't happen with the addon's ±6 m cells; guard anyway
         let grid = new Float32Array(w * h);
-        for (const [ix, iy, s] of heat.cells) grid[(iy - iy0 + HEAT_PAD) * w + (ix - ix0 + HEAT_PAD)] += s;
+        for (const [ix, iy, s] of cells) grid[(iy - iy0 + HEAT_PAD) * w + (ix - ix0 + HEAT_PAD)] += s;
         grid = blur(blur(grid, w, h), w, h);   // twice: soft edges without hiding single paths
         let max = 0;
         for (const v of grid) if (v > max) max = v;
@@ -544,11 +599,21 @@ export class Radar {
         this.heatNode = group;
     }
 
+    // Heat cells moved from the sensor's frame onto the floor, on both sides of the line
+    _floorCells(cells, cell) {
+        const out = [];
+        for (const [ix, iy, s] of cells) {
+            const row = Math.floor(this._fy((iy + 0.5) * cell) / cell);
+            out.push([ix, row, s], [ix, -row - 1, s]);
+        }
+        return out;
+    }
+
     _placeHeat() {
         if (this.heatNode) this.heatNode.setAttribute('transform', this._sensorMatrix());
     }
 
-    // sensor (x, y) → screen: the same maths as s2p, as an SVG transform
+    // floor frame (x, y) → screen: the same maths as f2p, as an SVG transform
     _sensorMatrix() {
         const { k, cs, sn, W, H, cx, cy } = this;
         const { x, y } = this.layout;
@@ -597,12 +662,14 @@ export class Radar {
             if (type.group === 'detection' && this.occupied[i]) cls += ' occupied';
             if (this.pending.has(`${type.category}:${area}`)) cls += ' pending';
             if (busy) cls += ' dim';
-            el('polygon', {
-                class: cls,
-                points: pts(CORNERS.map(([xe, ye]) => this.s2p(z[xe], z[ye]))),
+            const sides = [(x, y) => this.s2p(x, y)];
+            if (this.ceil) sides.push((x, y) => this._otherP(x, y));   // the radar can't tell which side
+            sides.forEach((toPx, n) => el('polygon', {
+                class: cls + (n ? ' other-side' : ''),
+                points: pts(CORNERS.map(([xe, ye]) => toPx(z[xe], z[ye]))),
                 fill: type.cls === 'intf' ? 'url(#hatch-intf)' : null,
                 'data-zone': busy ? null : `${type.category}:${area}`,
-            }, g);
+            }, g));
             this._zoneLabel(g, z, this._zoneText(type, area), type.cls + (busy ? ' dim' : ''));
         }
     }
@@ -612,7 +679,7 @@ export class Radar {
     // 15,000 dots. Their stroke doesn't scale (CSS vector-effect), so dots keep their pixel size.
     _recPath(points) {
         let d = '';
-        for (const p of points) d += `M${Math.round(p.x)} ${Math.round(p.y)}h0`;
+        for (const p of points) d += `M${Math.round(p.x)} ${Math.round(this._fy(p.y))}h0`;
         return d;
     }
 
@@ -700,6 +767,7 @@ export class Radar {
                 const group = el('g', { class: 'target' }, g);
                 node = {
                     group,
+                    other: el('circle', { class: 'target-other' }, group),
                     dot: el('circle', { class: 'target-dot' }, group),
                     label: el('text', { class: 'target-label', 'dominant-baseline': 'middle' }, group),
                 };
@@ -713,6 +781,15 @@ export class Radar {
             node.dot.setAttribute('cx', r1(p[0]));
             node.dot.setAttribute('cy', r1(p[1]));
             node.dot.setAttribute('r', r1(r));
+            // Under a ceiling the person may be on the other side of the line just as well
+            const q = this.ceil ? this._otherP(t.x, t.y) : null;
+            const apart = q && Math.hypot(q[0] - p[0], q[1] - p[1]) > 2 * r;
+            node.other.setAttribute('visibility', apart ? 'visible' : 'hidden');
+            if (apart) {
+                node.other.setAttribute('cx', r1(q[0]));
+                node.other.setAttribute('cy', r1(q[1]));
+                node.other.setAttribute('r', r1(r));
+            }
             node.label.setAttribute('x', r1(p[0] + r + 5));
             node.label.setAttribute('y', r1(p[1] - r - 2));
             if (node.id.textContent !== key) node.id.textContent = key;
@@ -749,6 +826,14 @@ export class Radar {
                 fill: type.cls === 'intf' ? 'url(#hatch-intf)' : null,
                 'data-drag': 'body', 'data-owner': 'draft',
             }, g);
+            if (this.ceil) {
+                el('polygon', {
+                    class: `zone ${type.cls} draft other-side`,
+                    points: pts(CORNERS.map(([xe, ye]) => this._otherP(d[xe], d[ye]))),
+                    fill: type.cls === 'intf' ? 'url(#hatch-intf)' : null,
+                    'data-drag': 'body', 'data-owner': 'draft',
+                }, g);
+            }
             this._zoneLabel(g, d, this._zoneText(type, this.edit.area), type.cls);
             this._handles(g, d, (x, y) => this.s2p(x, y), 'draft');
         }
@@ -885,6 +970,22 @@ export class Radar {
                 return;
             case 'body': {
                 if (!this.edit) { this._dropDrag(); return; }
+                if (this.ceil) {
+                    // Moved across the floor: the zone keeps its size there, not in the radar's
+                    // numbers, and can't be pushed through the line. Dragged by its copy on the
+                    // other side, away from the line is the other way.
+                    const a = this.p2f(d.start[0], d.start[1]), b = this.p2f(p[0], p[1]);
+                    const dx = Math.round(b[0] - a[0]);
+                    const near = this._fy(d.draft.y_min), far = this._fy(d.draft.y_max);
+                    const out = Math.max((b[1] - a[1]) * (a[1] < 0 ? -1 : 1), -near);
+                    Object.assign(this.edit.draft, {
+                        x_min: d.draft.x_min + dx, x_max: d.draft.x_max + dx,
+                        y_min: Math.round(this._ry(near + out)), y_max: Math.round(this._ry(far + out)),
+                    });
+                    this.invalidate('edit');
+                    this.cb.onDraft(false);
+                    return;
+                }
                 const a = this.p2s(d.start[0], d.start[1]), b = this.p2s(p[0], p[1]);
                 const dx = Math.round(b[0] - a[0]), dy = Math.round(b[1] - a[1]);
                 Object.assign(this.edit.draft, {

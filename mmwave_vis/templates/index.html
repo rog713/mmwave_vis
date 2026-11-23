@@ -10,6 +10,7 @@
     <script type="module" src="{{ ingress_path }}/assets/js/main.js?v={{ version }}"></script>
     {#- Fetch the rest of the modules alongside main.js instead of one import level at a time #}
     <link rel="modulepreload" href="{{ ingress_path }}/assets/js/state.js">
+    <link rel="modulepreload" href="{{ ingress_path }}/assets/js/ceiling.js">
     <link rel="modulepreload" href="{{ ingress_path }}/assets/js/prefs.js">
     <link rel="modulepreload" href="{{ ingress_path }}/assets/js/ui.js">
     <link rel="modulepreload" href="{{ ingress_path }}/assets/js/radar.js">
@@ -129,6 +130,7 @@
                 <span class="legend-filter"><i class="swatch intf"></i>Filter zone</span>
                 <span class="legend-ranges"><i class="swatch-line moving"></i>LD2412 moving</span>
                 <span class="legend-ranges"><i class="swatch-line still"></i>LD2412 still</span>
+                <span class="legend-other-side"><i class="swatch-ring"></i>Or here</span>
                 {%- else -%}
                 <span><i class="swatch det"></i>Detection</span>
                 <span><i class="swatch intf"></i>Interference</span>
@@ -169,7 +171,7 @@
 
         <div class="targets">
             <table>
-                <thead><tr><th>Target</th><th>{{ 'Across (X)' if esphome else 'Width' }}</th><th>{{ 'Out (Y)' if esphome else 'Depth' }}</th><th>{{ 'Distance' if esphome else 'Height' }}</th><th>Movement</th></tr></thead>
+                <thead><tr><th>Target</th><th>{{ 'Across (X)' if esphome else 'Width' }}</th><th id="thOut">{{ 'Out (Y)' if esphome else 'Depth' }}</th><th>{{ 'Distance' if esphome else 'Height' }}</th><th>Movement</th></tr></thead>
                 <tbody id="targetRows"><tr><td colspan="5" class="empty">No targets yet</td></tr></tbody>
             </table>
         </div>
@@ -628,13 +630,14 @@
                     <button class="info-btn" type="button" aria-label="About a sensor on a ceiling" aria-expanded="false" aria-controls="ceilingInfo" data-info="ceilingInfo"></button>
                 </div>
                 <div class="info-panel" id="ceilingInfo" hidden>
-                    <p>Looking down from a ceiling, the map isn't a floor plan. Across (X) is still what it says: walking along the radar's left-right line moves your dot sideways. Out (Y) is the distance from the sensor in every other direction, downwards included. So stepping off that line moves your dot further out, whichever side you step to, and nobody shows closer than the gap between the ceiling and a person.</p>
-                    <p>Walk under the sensor to see which way your dot goes, then name what's at each end of the line. Stand right under the sensor and read Out (Y) in the table for the last number. It only changes the picture.</p>
+                    <p>Looking down from a ceiling, the radar measures how far you are along its left-right line, and how far you are from the sensor in every other direction. With this on, the map is the floor from above with the sensor in the middle: left and right along that line, up and down to either side of it.</p>
+                    <p>The radar can't tell the two sides apart, so everyone is drawn twice: a solid dot on one side and a dashed one on the other. Zones cover both sides too.</p>
+                    <p>For "Sensor to a person", stand right under the sensor with this switch off and type the Out (Y) the table shows. The map is worked out for someone standing: a dog, or someone sitting, is drawn further to the side than they are. Name what's at each end of the line to see which way round the map is. It only changes the picture.</p>
                 </div>
                 <div class="grid-2 esphome-only" id="ceilingFields" style="margin-top:8px" hidden>
                     <label class="mini">At the minus (−) end<input type="text" id="ceilingNeg" maxlength="24" placeholder="Back wall"></label>
                     <label class="mini">At the plus (+) end<input type="text" id="ceilingPos" maxlength="24" placeholder="Garage door"></label>
-                    <label class="mini">Nobody closer than (cm)<input type="number" id="ceilingDrop" min="0" max="500" step="10"></label>
+                    <label class="mini">Sensor to a person (cm)<input type="number" id="ceilingDrop" min="0" max="500" step="10"></label>
                 </div>
             </section>
         </div>

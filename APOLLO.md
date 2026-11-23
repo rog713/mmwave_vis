@@ -45,7 +45,9 @@ The LD2450 measures a distance and one angle, from left to right. Looking down f
 
 So find the left-right line first: walk under the sensor in one direction, then at a right angle to it, and see which walk moves the dot sideways. Draw zones by walking the area and watching the dot (the movement recorder in the Zones tab helps) instead of measuring the floor. A zone covers both sides of the left-right line.
 
-Then turn on **Mounted on a ceiling** in the Display tab. It shades the part of the map nobody can show in, lets you name what is at each end of the left-right line ("Back wall", "Garage door") and labels the far side of the map. For "Nobody closer than", stand right under the sensor and use the Out (Y) the table shows. Like the rest of the layout it only changes the picture.
+Then turn on **Mounted on a ceiling** in the Display tab. The map becomes the floor from above, with the sensor in the middle: left and right along the radar's line, up and down to either side of it, and a ring for every metre from the point under the sensor. The radar can't tell the two sides apart, so everyone is drawn twice, a solid dot on one side and a dashed one on the other, and each zone covers both sides. Zone depths, the table and the heat map are shown the same way; the sensor still gets its own numbers.
+
+For "Sensor to a person", stand right under the sensor with the switch off and use the Out (Y) the table shows (about 130 cm under a garage ceiling). The map is worked out for someone standing: a dog, or someone sitting, is further from the sensor and is drawn further to the side than they are. Name what is at each end of the line ("Back wall", "Garage door") to see which way round the map is. Like the rest of the layout it only changes the picture.
 
 ## What you get
 

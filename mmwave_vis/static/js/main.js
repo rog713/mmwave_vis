@@ -6,6 +6,7 @@ import { state, on, emit, emptyZones, freshReportTimes, zoneName, customName, sl
 import * as prefs from './prefs.js';
 import { $, $$, h, setText, num, toast, setNotice, clearNotice, bindPopover, closePopover, confirmAction, downloadBlob, fileSafe, duration, bindInfo } from './ui.js';
 import { Radar } from './radar.js';
+import { shownY, ceilingOn } from './ceiling.js';
 import * as zones from './zones.js';
 import * as recorder from './recorder.js';
 import { initBackup } from './backup.js';
@@ -39,12 +40,20 @@ const radar = new Radar($('#radar'), {
     onZoneClick: (category, area) => zones.editFromMap(category, area),
     onLayout: (layout, final) => display.layoutFromMap(layout, final),
     onView: (range, final) => display.rangeFromMap(range, final),
-    onPointer: s => setText(coords, s ? `x ${num(s[0])} · y ${num(s[1])} cm` : ''),
+    onPointer: s => setText(coords, !s ? '' : ceilingOn()
+        ? `across ${num(s[0])} · to the side ${num(shownY(s[1]))} cm`
+        : `x ${num(s[0])} · y ${num(s[1])} cm`),
 });
 
 on('zones', () => radar.setZones(zones.displayZones(), zones.pendingKeys()));
 on('names', () => { radar.setNames(state.zoneNames); renderAreaChips(); });
 on('draft', () => radar.draftChanged());
+// The sensor's map changed between the radar's own numbers and the floor under a ceiling
+on('ceiling', () => {
+    mapEl.classList.toggle('ceiling', ceilingOn());
+    if (ESPHOME) setText($('#thOut'), ceilingOn() ? 'To the side' : 'Out (Y)');
+    if (tableList.length) renderTable(tableList);
+});
 on('replay-targets', list => {
     setText($('#targetCount'), String(list.length));
     renderTable(list);
@@ -205,8 +214,12 @@ function emptyRow(text) {
     tableBody.replaceChildren(h('tr', null, h('td', { colspan: 5, class: 'empty' }, text)));
 }
 
+let tableList = [];
+
 function renderTable(list) {
-    const key = JSON.stringify(list);
+    tableList = list;
+    // Under a ceiling the second column is the distance to the side, as the map draws it
+    const key = JSON.stringify(list) + (ceilingOn() ? `|${state.layout.ceiling.drop}` : '');
     if (key === tableKey) return;
     tableKey = key;
     if (!list.length) { emptyRow('No one in view'); return; }
@@ -219,7 +232,7 @@ function renderTable(list) {
         const third = HAS_HEIGHT ? `${num(t.z)} cm` : `${(Math.hypot(Number(t.x), Number(t.y)) / 100).toFixed(2)} m`;
         return h('tr', null,
             h('td', null, h('strong', null, String(t.id))),
-            h('td', null, `${num(t.x)} cm`), h('td', null, `${num(t.y)} cm`), h('td', null, third),
+            h('td', null, `${num(t.x)} cm`), h('td', null, `${num(shownY(t.y))} cm`), h('td', null, third),
             h('td', { class: cls }, text));
     }));
 }
