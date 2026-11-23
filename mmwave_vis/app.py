@@ -1847,4 +1847,5 @@ def zwave_capture_download():
 
 
 if __name__ == '__main__':
-    socketio.run(app, host='0.0.0.0', port=5000, allow_unsafe_werkzeug=True)
+    # PORT: for a run outside the container. On a Mac, AirPlay Receiver already listens on 5000.
+    socketio.run(app, host='0.0.0.0', port=int(os.environ.get('PORT') or 5000), allow_unsafe_werkzeug=True)

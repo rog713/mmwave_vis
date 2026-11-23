@@ -365,6 +365,17 @@ def test_live_readings_for_each_radar():
     assert live["available"] is True
 
 
+def test_gates_empty_when_engineering_mode_goes_off():
+    # The gate sensors all turn unknown. The page keeps what it was last sent, so the
+    # rows of nulls must be sent or the bars stay filled (seen on a real R PRO-1).
+    unknown = {f"g{g}_{kind}": "unknown" for g in range(ee.GATE_COUNT) for kind in ("move", "still")}
+    live = ee.build_payload(reader(unknown), roles=set(unknown))["esphome"]
+    assert live["gate_move"] == [None] * ee.GATE_COUNT
+    assert live["gate_still"] == [None] * ee.GATE_COUNT
+    # A device without gate entities says nothing about gates
+    assert "esphome" not in ee.build_payload(reader({}), roles={"g0_move"})
+
+
 def test_a_sensor_that_dropped_off_the_network_is_unavailable():
     payload = ee.build_payload(reader({"t1_x": "unavailable", "t1_y": "unavailable", "ld2450_presence": "unavailable"}))
     assert payload["esphome"]["available"] is False
@@ -460,7 +471,9 @@ def test_service_calls_for_each_kind_of_entity():
 
 def test_info_for_the_config_tab():
     roles, disabled = ee.entity_roles(registry())
-    states = {"firmware": "26.3.2.1", "esphome_version": "2026.3.1", "ip_address": "192.168.1.57", "update": "on"}
+    # The version sensor's state as a real R PRO-1 reports it, with its configuration's hash
+    states = {"firmware": "26.3.2.1", "esphome_version": "2026.3.1 (config hash 0x5ac68674)",
+              "ip_address": "192.168.1.57", "update": "on"}
     attrs = {"update": {"installed_version": "26.3.2.1", "latest_version": "26.4.0.1", "in_progress": False}}
     entry = ee.device_entry({"id": "dev1", "name": "Apollo R_PRO-1", "manufacturer": "ApolloAutomation",
                              "model": "R-PRO-1-ETH", "connections": [["mac", MAC]]})

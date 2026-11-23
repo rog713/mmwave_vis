@@ -503,8 +503,11 @@ def build_payload(read, roles=None):
                 live[role] = None if v is None else int(round(v))
     if any_of(GATE_ROLES):
         for kind in ('move', 'still'):
-            row = [number(read(f'g{g}_{kind}')[0]) for g in range(GATE_COUNT)]
-            if any(v is not None for v in row):
+            states = [read(f'g{g}_{kind}')[0] for g in range(GATE_COUNT)]
+            # None = no such entity. With engineering mode off every gate is unknown, and
+            # that row of nulls has to be sent: it's what empties the bars on the page.
+            if any(s is not None for s in states):
+                row = [number(s) for s in states]
                 live[f'gate_{kind}'] = [None if v is None else int(round(v)) for v in row]
     if any_of(TARGET_ROLES):
         # Every entity of a device goes unavailable together when it drops off the network
@@ -541,7 +544,8 @@ def build_info(entry, roles, disabled, read, read_attrs):
         return str(state) if known(state) else None
 
     firmware = text('firmware')
-    esphome_version = text('esphome_version')
+    # The sensor reports "2026.3.1 (config hash 0x5ac68674)"; only the version is shown
+    esphome_version = re.sub(r'\s*\(config hash[^)]*\)', '', text('esphome_version') or '').strip() or None
     radars = [f"{name} {v}" for name, v in (('LD2450', text('ld2450_firmware')), ('LD2412', text('ld2412_firmware'))) if v]
     update = None
     if 'update' in roles:

@@ -161,7 +161,7 @@ def r_pro_1(length_unit="mm", zone_unit="mm"):
     add("sensor", "ESP Temperature", "48.2", {"unit_of_measurement": "°C", "device_class": "temperature"}, disabled=True)
     add("sensor", "Uptime", num(4211), {"unit_of_measurement": "s", "device_class": "duration"})
     add("sensor", "Apollo Firmware Version", "26.3.2.1", platform="text_sensor")
-    add("sensor", "ESPHome Version", "2026.3.1", platform="text_sensor")
+    add("sensor", "ESPHome Version", "2026.3.1 (config hash 0x5ac68674)", platform="text_sensor")
     add("sensor", "IP Address", "192.168.1.57", platform="text_sensor")
     add("binary_sensor", "Online", "on", {"device_class": "connectivity"})
     add("switch", "Reduce DB Reporting", "off")

@@ -96,3 +96,5 @@ ZIGBEE_STACK=esphome HA_URL=http://127.0.0.1:8123 HA_TOKEN=anything DATA_DIR=/tm
 ```
 
 Then open `http://127.0.0.1:5000`. Two simulated people walk around in front of the sensor.
+
+The same command works against a real Home Assistant: give it your own `HA_URL` and a long-lived access token as `HA_TOKEN`. On a Mac, AirPlay Receiver already uses port 5000, so add `PORT=5055` (or any free port) and open that port instead.
