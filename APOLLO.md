@@ -36,6 +36,15 @@ Stand in front of the sensor and step to one side. If your dot moves the other w
 
 The same tab places the sensor in your room (Arrange on map), which is worth doing for a ceiling mount.
 
+### On a ceiling
+
+The LD2450 measures a distance and one angle, from left to right. Looking down from a ceiling, that makes the map something other than a floor plan (measured with an R PRO-1 on a garage ceiling):
+
+- **Across (X)** is still what it says. Walking along the radar's left-right line moves the dot sideways by as far as you walk, and the dot stays the same distance out.
+- **Out (Y)** is the distance from the sensor in every other direction, downwards included. Someone standing right under the sensor shows about 130 to 150 cm out, never 0. Walking away at a right angle to the left-right line moves the dot further out, whichever side you walk to.
+
+So find the left-right line first: walk under the sensor in one direction, then at a right angle to it, and see which walk moves the dot sideways. Draw zones by walking the area and watching the dot (the movement recorder in the Zones tab helps) instead of measuring the floor. A zone covers both sides of the left-right line.
+
 ## What you get
 
 - **Live map** of the people the LD2450 tracks, with their speed and distance in the table underneath.
