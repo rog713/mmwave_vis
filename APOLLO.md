@@ -45,6 +45,8 @@ The LD2450 measures a distance and one angle, from left to right. Looking down f
 
 So find the left-right line first: walk under the sensor in one direction, then at a right angle to it, and see which walk moves the dot sideways. Draw zones by walking the area and watching the dot (the movement recorder in the Zones tab helps) instead of measuring the floor. A zone covers both sides of the left-right line.
 
+Then turn on **Mounted on a ceiling** in the Display tab. It shades the part of the map nobody can show in, lets you name what is at each end of the left-right line ("Back wall", "Garage door") and labels the far side of the map. For "Nobody closer than", stand right under the sensor and use the Out (Y) the table shows. Like the rest of the layout it only changes the picture.
+
 ## What you get
 
 - **Live map** of the people the LD2450 tracks, with their speed and distance in the table underneath.

@@ -80,7 +80,7 @@ export const state = {
     arranging: false,         // room layout mode
     replay: null,             // a recorded clip being played back instead of live data
     restoring: false,         // a backup restore or multi-zone undo is writing slots
-    layout: { x: 0, y: 0, rot: 0, room: null, mirror: false },
+    layout: { x: 0, y: 0, rot: 0, room: null, mirror: false, ceiling: null },
     stayInvert: false,
     zoneMode: null,           // ESPHome: the LD2450's zone type, 'Disabled' | 'Detection' | 'Filter'
     lastCommandId: null,      // 1 = auto-detect interference, 3 = clear interference

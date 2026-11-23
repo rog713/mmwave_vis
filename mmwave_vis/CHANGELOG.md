@@ -11,6 +11,7 @@
   - Radars tab: both presence timeouts and the LD2412's 14 gates as energy bars against their thresholds (engineering mode), plus calibrate, restart and factory reset for each radar.
   - Config tab: both radars' settings, including every gate threshold. Settings whose entity is disabled in Home Assistant are greyed out.
   - Display tab: "Mirror left and right" for a sensor that counts left and right the other way round, saved with the room layout.
+  - Display tab: "Mounted on a ceiling" for a sensor that looks down, where the map isn't a floor plan. It shades the distance nobody can show in, names the two ends of the left-right line and says what further out means.
   - Lengths are converted from whatever unit Home Assistant shows the sensor's entities in (inches on a US-customary install).
 - Standalone Docker: without a Supervisor, `HA_URL` and `HA_TOKEN` are used to reach Home Assistant directly for the ESPHome mode.
 

@@ -101,6 +101,37 @@ def test_mirror_is_only_kept_when_set():
         assert 'mirror' not in normalize_layout({'mirror': off})[0]
 
 
+def test_ceiling_mount_keeps_its_drop_and_end_names():
+    # A sensor looking down from a ceiling: the page shades the first `drop` cm, where
+    # nobody can show, and names the two ends of the x axis
+    layout, error = normalize_layout({'ceiling': {'drop': 142.4, 'neg': ' Back  wall ', 'pos': 'Garage door'}})
+    assert error is None
+    assert layout['ceiling'] == {'drop': 142, 'neg': 'Back wall', 'pos': 'Garage door'}
+
+
+def test_ceiling_mount_defaults_and_is_only_kept_when_set():
+    assert normalize_layout({'ceiling': {}})[0]['ceiling'] == {'drop': 130, 'neg': '', 'pos': ''}
+    assert 'ceiling' not in normalize_layout({'x': 5})[0]
+    assert 'ceiling' not in normalize_layout({'ceiling': None})[0]
+
+
+def test_ceiling_mount_names_are_cleaned_and_cut():
+    ceiling = normalize_layout({'ceiling': {'neg': 'a\nb\x00c', 'pos': 'x' * 60}})[0]['ceiling']
+    assert ceiling['neg'] == 'a b c'
+    assert ceiling['pos'] == 'x' * 24
+
+
+def test_bad_ceiling_mount_rejected():
+    for bad in (True, 'yes', [130], 130):
+        layout, error = normalize_layout({'ceiling': bad})
+        assert layout is None and 'ceiling' in error, bad
+    for bad in ('130', None, True, float('nan'), -1, 501):
+        layout, error = normalize_layout({'ceiling': {'drop': bad}})
+        assert layout is None and 'ceiling.drop' in error, bad
+    layout, error = normalize_layout({'ceiling': {'neg': 5}})
+    assert layout is None and 'ceiling.neg' in error
+
+
 # ===========================================================================
 # LayoutStore
 # ===========================================================================

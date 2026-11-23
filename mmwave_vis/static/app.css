@@ -242,6 +242,9 @@ a.btn.off { opacity: 0.45; pointer-events: none; }
 .radar .fov-ext { fill: none; stroke: var(--map-fov-line); stroke-opacity: 0.5; stroke-width: 1; stroke-dasharray: 6 5; }
 .radar .ring { fill: none; stroke: var(--map-fov-line); stroke-opacity: 0.45; stroke-width: 1; stroke-dasharray: 2 5; }
 .radar .ring-label { fill: var(--text-3); font-size: 11px; }
+.radar .ceiling-band { fill: var(--text-3); fill-opacity: 0.12; stroke: none; }
+.radar .ceiling-note { fill: var(--text-3); font-size: 11px; }
+.radar .axis-end { fill: var(--text-2); font-size: 12px; font-weight: 600; paint-order: stroke; stroke: var(--surface); stroke-width: 3px; stroke-linejoin: round; }
 
 .radar .room { fill: none; stroke: var(--text-2); stroke-width: 3; stroke-linejoin: round; }
 .radar .dim-label { fill: var(--text-2); font-size: 12px; font-weight: 500; }
@@ -435,6 +438,7 @@ input[type="checkbox"].switch:focus-visible { outline: 2px solid var(--accent); 
 .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 10px; }
 .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px 10px; }
 .mini { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--text-2); }
+.mini input[type="text"] { width: 100%; min-width: 0; }
 .button-row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
 
 /* --- Toasts and dialog ------------------------------------------------------ */

@@ -17,7 +17,12 @@ const TOGGLES = [
     ['vizToggleRanges', 'vizShowRanges', 'ranges', true],      // ESPHome: the LD2412's distances
 ];
 const RANGE_KEYS = { xMin: 'vizXMin', xMax: 'vizXMax', yMin: 'vizYMin', yMax: 'vizYMax' };
-const EMPTY_LAYOUT = { x: 0, y: 0, rot: 0, room: null, mirror: false };
+const EMPTY_LAYOUT = { x: 0, y: 0, rot: 0, room: null, mirror: false, ceiling: null };
+// A sensor on a ceiling: nobody shows closer than `drop` cm (the gap down to a person);
+// `neg` and `pos` name what's at the two ends of the x axis
+const CEILING_DEFAULT = { drop: 130, neg: '', pos: '' };
+const CEILING_DROP_MAX = 500;
+const END_NAME_MAX = 24;
 const LAYOUT_LIMIT = 10000;   // cm either way; the addon refuses a layout beyond this
 const MIN_ROOM = 20;          // cm
 
@@ -124,6 +129,15 @@ export function fillLayout() {
     set('layoutY', l.y);
     set('layoutRot', l.rot);
     $('#layoutMirror').checked = !!l.mirror;
+    $('#layoutCeiling').checked = !!l.ceiling;
+    $('#ceilingFields').hidden = !l.ceiling;
+    if (l.ceiling) {
+        set('ceilingDrop', l.ceiling.drop);
+        for (const [id, end] of [['ceilingNeg', 'neg'], ['ceilingPos', 'pos']]) {
+            const input = $('#' + id);
+            if (document.activeElement !== input) input.value = l.ceiling[end] || '';
+        }
+    }
     $('#btnRoom').textContent = l.room ? 'Remove room outline' : 'Add room outline';
     $('#roomFields').hidden = !l.room;
     if (l.room) {
@@ -133,7 +147,8 @@ export function fillLayout() {
 }
 
 function copyLayout(l) {
-    return { x: l.x, y: l.y, rot: l.rot, room: l.room ? { ...l.room } : null, mirror: !!l.mirror };
+    return { x: l.x, y: l.y, rot: l.rot, room: l.room ? { ...l.room } : null, mirror: !!l.mirror,
+        ceiling: l.ceiling ? { ...CEILING_DEFAULT, ...l.ceiling } : null };
 }
 
 // Whole centimetres and degrees, within what the addon accepts, and a room with some size
@@ -143,6 +158,11 @@ function tidyLayout(l) {
     l.y = c(l.y);
     l.rot = ((Math.round(Number(l.rot) || 0) % 360) + 360) % 360;
     l.mirror = !!l.mirror;
+    if (l.ceiling) {
+        const drop = Math.round(Number(l.ceiling.drop));
+        l.ceiling.drop = Number.isFinite(drop) ? Math.min(CEILING_DROP_MAX, Math.max(0, drop)) : CEILING_DEFAULT.drop;
+        for (const end of ['neg', 'pos']) l.ceiling[end] = String(l.ceiling[end] || '').trim().slice(0, END_NAME_MAX);
+    }
     if (l.room) {
         const r = l.room;
         for (const [lo, hi] of [['x_min', 'x_max'], ['y_min', 'y_max']]) {
@@ -163,7 +183,7 @@ function scheduleSave() {
     clearTimeout(saveTimer);
     const topic = state.device;
     const layout = copyLayout(state.layout);
-    const isEmpty = !layout.x && !layout.y && !layout.rot && !layout.room && !layout.mirror;
+    const isEmpty = !layout.x && !layout.y && !layout.rot && !layout.room && !layout.mirror && !layout.ceiling;
     saveTimer = setTimeout(() => {
         if (!topic) return;
         state.socket.emit('save_layout', { topic, layout: isEmpty ? null : layout }, ack => {
@@ -241,14 +261,26 @@ function initLayout() {
     $('#btnLayoutReset').addEventListener('click', async () => {
         if (needDevice()) return;
         if (!await confirmAction(`Put the ${DEV} back in the middle with no room outline?`, { confirm: 'Reset layout' })) return;
-        // Mirroring says which way the radar counts x, not where it sits, so it's kept
-        changeLayout(l => Object.assign(l, EMPTY_LAYOUT, { mirror: l.mirror }));
+        // Mirroring and a ceiling mount say how the sensor is mounted, not where it sits, so they're kept
+        changeLayout(l => Object.assign(l, EMPTY_LAYOUT, { mirror: l.mirror, ceiling: l.ceiling }));
         fullRange();
     });
     $('#layoutMirror').addEventListener('change', e => {
         const mirror = e.target.checked;
         if (needDevice()) { e.target.checked = !!state.layout.mirror; return; }
         changeLayout(l => { l.mirror = mirror; });
+    });
+    $('#layoutCeiling').addEventListener('change', e => {
+        const on = e.target.checked;
+        if (needDevice()) { e.target.checked = !!state.layout.ceiling; return; }
+        changeLayout(l => { l.ceiling = on ? { ...CEILING_DEFAULT } : null; });
+    });
+    for (const [id, end] of [['ceilingNeg', 'neg'], ['ceilingPos', 'pos']]) {
+        $('#' + id).addEventListener('change', e => changeLayout(l => { if (l.ceiling) l.ceiling[end] = e.target.value; }));
+    }
+    $('#ceilingDrop').addEventListener('change', () => {
+        const v = num('ceilingDrop');
+        if (!Number.isNaN(v)) changeLayout(l => { if (l.ceiling) l.ceiling.drop = v; });
     });
     $('#btnArrange').addEventListener('click', () => {
         if (!state.arranging && needDevice()) return;

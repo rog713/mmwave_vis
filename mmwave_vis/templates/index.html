@@ -623,6 +623,19 @@
                     <p>Stand in front of the sensor and step to one side. If your dot moves the other way on the map, turn this on. Which way the radar counts depends on how the sensor is mounted.</p>
                     <p>Like the rest of the layout it only changes the picture: zones stay where they are in the room.</p>
                 </div>
+                <div class="check-row esphome-only">
+                    <label class="check"><input type="checkbox" id="layoutCeiling"><span>Mounted on a ceiling</span></label>
+                    <button class="info-btn" type="button" aria-label="About a sensor on a ceiling" aria-expanded="false" aria-controls="ceilingInfo" data-info="ceilingInfo"></button>
+                </div>
+                <div class="info-panel" id="ceilingInfo" hidden>
+                    <p>Looking down from a ceiling, the map isn't a floor plan. Across (X) is still what it says: walking along the radar's left-right line moves your dot sideways. Out (Y) is the distance from the sensor in every other direction, downwards included. So stepping off that line moves your dot further out, whichever side you step to, and nobody shows closer than the gap between the ceiling and a person.</p>
+                    <p>Walk under the sensor to see which way your dot goes, then name what's at each end of the line. Stand right under the sensor and read Out (Y) in the table for the last number. It only changes the picture.</p>
+                </div>
+                <div class="grid-2 esphome-only" id="ceilingFields" style="margin-top:8px" hidden>
+                    <label class="mini">At the minus (−) end<input type="text" id="ceilingNeg" maxlength="24" placeholder="Back wall"></label>
+                    <label class="mini">At the plus (+) end<input type="text" id="ceilingPos" maxlength="24" placeholder="Garage door"></label>
+                    <label class="mini">Nobody closer than (cm)<input type="number" id="ceilingDrop" min="0" max="500" step="10"></label>
+                </div>
             </section>
         </div>
     </aside>

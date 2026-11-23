@@ -71,6 +71,34 @@ def _layout_number(value, name):
     return value
 
 
+CEILING_DROP_DEFAULT = 130   # cm from a sensor on a ceiling down to a standing person
+CEILING_DROP_MAX = 500
+MAX_END_NAME = 24
+
+
+def _ceiling(value):
+    """The `ceiling` part of a layout, for a sensor that looks down from a ceiling.
+
+    Its map isn't a floor plan: only x is a line across the floor, and nobody shows
+    closer than `drop` cm, the gap between the ceiling and a person. `neg` and `pos`
+    name what is at the two ends of the x axis ('' for no name).
+    """
+    if not isinstance(value, dict):
+        raise ValueError("ceiling must be an object or null")
+    drop = value.get('drop', CEILING_DROP_DEFAULT)
+    if isinstance(drop, bool) or not isinstance(drop, (int, float)) or drop != drop:
+        raise ValueError("ceiling.drop must be a number")
+    if drop < 0 or drop > CEILING_DROP_MAX:
+        raise ValueError(f"ceiling.drop={drop} out of range")
+    clean = {'drop': round(drop)}
+    for end in ('neg', 'pos'):
+        name = value.get(end, '')
+        if not isinstance(name, str):
+            raise ValueError(f"ceiling.{end} must be text")
+        clean[end] = clean_name(name, MAX_END_NAME)
+    return clean
+
+
 def normalize_layout(layout):
     """Check a room layout from the page and return a cleaned copy.
 
@@ -78,7 +106,8 @@ def normalize_layout(layout):
     the switch sits (cm), `rot` the way it faces (degrees, counter-clockwise),
     and `room` is an optional wall outline `{x_min, x_max, y_min, y_max}`.
     `mirror: true` (only kept when set) draws the sensor's left and right swapped,
-    for a sensor mounted the other way up.
+    for a sensor mounted the other way up. `ceiling` (only kept when set) says the
+    sensor looks down from a ceiling: see _ceiling().
     Returns (layout, None) or (None, error message). Unknown keys are dropped.
     """
     if not isinstance(layout, dict):
@@ -100,6 +129,8 @@ def normalize_layout(layout):
             clean['room'] = r
         if layout.get('mirror') is True:
             clean['mirror'] = True
+        if layout.get('ceiling') is not None:
+            clean['ceiling'] = _ceiling(layout['ceiling'])
     except ValueError as e:
         return None, str(e)
     if clean['rot'] == 360:   # 359.96 rounds up

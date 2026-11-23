@@ -99,7 +99,7 @@ export class Radar {
         this.W = 0;
         this.H = 0;
         this.range = { ...DEFAULT_RANGE };
-        this.layout = { x: 0, y: 0, rot: 0, room: null, mirror: false };
+        this.layout = { x: 0, y: 0, rot: 0, room: null, mirror: false, ceiling: null };
         this.zones = null;
         this.pending = new Set();
         this.vis = { grid: true, labels: true, heights: false, detection: true, det: [true, true, true, true], stay: true, interference: true, ranges: true };
@@ -163,7 +163,8 @@ export class Radar {
     setLayout(layout) {
         if (this.drag && ['sensor', 'rotate'].includes(this.drag.kind)) return;
         if (this.drag && this.drag.owner === 'room') return;
-        this.layout = { x: layout.x || 0, y: layout.y || 0, rot: layout.rot || 0, room: layout.room ? { ...layout.room } : null, mirror: !!layout.mirror };
+        this.layout = { x: layout.x || 0, y: layout.y || 0, rot: layout.rot || 0, room: layout.room ? { ...layout.room } : null, mirror: !!layout.mirror,
+            ceiling: layout.ceiling ? { ...layout.ceiling } : null };
         this.invalidate('all');
     }
 
@@ -378,6 +379,7 @@ export class Radar {
         }
         el('path', { class: 'grid', d: minor }, g);
         el('path', { class: 'grid-axis', d: axes }, g);
+        this._renderCeiling(g);
 
         // cm ticks along the switch's wall (x) and straight out from it (y)
         const every = step * k >= 52 ? step : step * 2;
@@ -421,6 +423,34 @@ export class Radar {
                 el('text', { class: 'ring-label', x: r1(p[0]), y: r1(p[1]), 'text-anchor': this.mx > 0 ? null : 'end', 'dominant-baseline': 'middle' }, g).textContent = `${r / 100} m`;
             }
         }
+    }
+
+    // A sensor looking down from a ceiling measures one angle and a distance, so its map isn't
+    // a floor plan: only x is a line across the floor, y is the distance from the sensor in
+    // every other direction (downwards included), and nobody shows closer than the gap between
+    // the ceiling and a person. Shade that gap, name the two ends of the x axis and say what
+    // further out means.
+    _renderCeiling(g) {
+        const c = this.layout.ceiling;
+        if (!c) return;
+        const { W, H, k } = this;
+        const inView = p => p[0] > 4 && p[0] < W - 4 && p[1] > 4 && p[1] < H - 4;
+        const note = (p, text, cls) => el('text', { class: cls, x: r1(p[0]), y: r1(p[1]), 'text-anchor': 'middle', 'dominant-baseline': 'middle' }, g).textContent = text;
+        const across = Math.abs(this.cs) >= Math.abs(this.sn);     // the x axis runs across the screen
+        if (c.drop > 0) {
+            el('polygon', { class: 'ceiling-band', points: pts([[-FOV_RANGE, 0], [FOV_RANGE, 0], [FOV_RANGE, c.drop], [-FOV_RANGE, c.drop]].map(p => this.s2p(p[0], p[1]))) }, g);
+            const p = this.s2p(-FOV_RANGE / 2, c.drop / 2);
+            if (across && c.drop * k >= 18 && inView(p)) note(p, 'Nobody shows this close', 'ceiling-note');
+        }
+        for (const [name, side] of [[c.neg, -1], [c.pos, 1]]) {
+            if (!name) continue;
+            // Under the axis, below its tick numbers; inside the shaded band when that's off the map
+            let p = this.s2p(side * FOV_RANGE * 0.8, -32 / k);
+            if (!inView(p)) p = this.s2p(side * FOV_RANGE * 0.8, 12 / k);
+            if (inView(p)) note(p, name, 'axis-end');
+        }
+        const far = this.s2p(0, FOV_RANGE + 18 / k);
+        if (inView(far)) note(far, 'Further out: off this line, on either side', 'ceiling-note');
     }
 
     // A point `r` cm from the sensor, `deg` degrees right of straight ahead, on screen
